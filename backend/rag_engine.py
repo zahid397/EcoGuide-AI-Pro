@@ -7,6 +7,9 @@ from utils.logger import logger
 
 COLLECTION = "eco_travel_v3"
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
 
 # ---------------------- TF-IDF Embedder ----------------------
 class SafeEmbedder:
@@ -31,11 +34,15 @@ class SafeEmbedder:
 # ---------------------- RAG Engine ----------------------
 class RAGEngine:
     def __init__(self):
-        # LOCAL QDRANT (Streamlit safe!)
+        # Delete old qdrant folder if locked
+        if os.path.exists("qdrant_local/lock"):
+            import shutil
+            shutil.rmtree("qdrant_local", ignore_errors=True)
+
+        # Start local Qdrant storage
         self.client = QdrantClient(path="qdrant_local")
 
         self.embedder = SafeEmbedder()
-
         self._ensure_collection()
         self._index_all()
 
@@ -58,8 +65,11 @@ class RAGEngine:
             )
 
 
-    # ------------------ Indexing ------------------
-    def _index_file(self, file_path, data_type):
+    # ---------------------- Index File ----------------------
+    def _index_file(self, filename, data_type):
+
+        file_path = os.path.join(DATA_DIR, filename)
+
         if not os.path.exists(file_path):
             logger.error(f"❌ Missing CSV: {file_path}")
             return
@@ -72,32 +82,38 @@ class RAGEngine:
             payload["data_type"] = data_type
             payload["eco_score"] = float(payload.get("eco_score", 0))
 
-            # TEXT FOR EMBEDDING
-            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')} {data_type}"
+            text = (
+                f"{payload.get('name','')} "
+                f"{payload.get('location','')} "
+                f"{payload.get('description','')} "
+                f"{data_type}"
+            )
 
-            embed = self.embedder.encode(text)
+            emb = self.embedder.encode(text)
 
             points.append(
                 models.PointStruct(
                     id=str(uuid4()),
-                    vector=embed,
+                    vector=emb,
                     payload=payload
                 )
             )
 
         if points:
-            self.client.upsert(COLLECTION, points)
-            print(f"Indexed {len(points)} items from {file_path}")
+            self.client.upsert(collection_name=COLLECTION, points=points)
+            print(f"Indexed {len(points)} from {filename}")
 
 
+    # ---------------------- Index ALL ----------------------
     def _index_all(self):
         print("Indexing data...")
-        self._index_file("data/hotels.csv", "Hotel")
-        self._index_file("data/activities.csv", "Activity")
-        self._index_file("data/places.csv", "Place")
+
+        self._index_file("hotels.csv", "Hotel")
+        self._index_file("activities.csv", "Activity")
+        self._index_file("places.csv", "Place")
 
 
-    # ------------------ SEARCH ------------------
+    # ---------------------- SEARCH ----------------------
     def search(self, query, top_k=20, min_eco_score=7.0):
 
         try:
