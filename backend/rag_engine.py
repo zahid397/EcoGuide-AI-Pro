@@ -16,7 +16,7 @@ FEEDBACK_FILE = "data/feedback.csv"
 
 
 # ---------------------------------------------------------
-# SAFE EMBEDDER (No Torch, No GPU)
+# SAFE EMBEDDER (Torch/GPU Free)
 # ---------------------------------------------------------
 class SafeEmbedder:
     def __init__(self):
@@ -32,6 +32,7 @@ class SafeEmbedder:
         try:
             vec = self.vectorizer.transform([text]).toarray()
         except Exception:
+            # First time → train on first text
             self.fit([text])
             vec = self.vectorizer.transform([text]).toarray()
         return vec[0].tolist()
@@ -39,15 +40,9 @@ class SafeEmbedder:
 
 # ---------------------------------------------------------
 class RAGEngine:
-    client: QdrantClient
-    embedder: SafeEmbedder
-    vector_size: int = 384
-
-    def __init__(self) -> None:
+    def __init__(self):
         if not QDRANT_URL:
-            raise EnvironmentError("QDRANT_URL is missing.")
-        if not QDRANT_API_KEY:
-            logger.warning("QDRANT_API_KEY missing! Required for Qdrant Cloud.")
+            raise EnvironmentError("❌ QDRANT_URL missing")
 
         try:
             self.client = QdrantClient(
@@ -55,20 +50,16 @@ class RAGEngine:
                 api_key=QDRANT_API_KEY,
                 timeout=60,
                 https=True,
-                prefer_grpc=False,
+                prefer_grpc=False
             )
 
             self.embedder = SafeEmbedder()
 
-            # Check if collection exists
-            try:
-                collections = self.client.get_collections().collections
-                existing = [c.name for c in collections]
-            except Exception:
-                existing = []
+            # Check existing collections
+            collections = self.client.get_collections().collections
+            existing = [c.name for c in collections]
 
             if COLLECTION not in existing:
-                print("Indexing data sources...")
                 self._init_collection()
                 self._index_all()
 
@@ -76,113 +67,134 @@ class RAGEngine:
             logger.exception(f"Failed to initialize RAGEngine: {e}")
             raise
 
-    # -----------------------------------------------------
-    def _init_collection(self) -> None:
+
+    # ---------------------------------------------------------
+    def _init_collection(self):
         self.client.recreate_collection(
             collection_name=COLLECTION,
             vectors_config=models.VectorParams(
-                size=self.vector_size,
+                size=384,
                 distance=models.Distance.COSINE,
             ),
         )
+        print("✅ Collection initialized")
 
-    # -----------------------------------------------------
-    def _index_file(self, file_path: str, data_type: str) -> None:
+
+    # ---------------------------------------------------------
+    def _safe_get(self, row, keys, default=0):
+        """Safe getter to avoid missing column errors."""
+        for k in keys:
+            if k in row and pd.notna(row[k]):
+                return row[k]
+        return default
+
+
+    # ---------------------------------------------------------
+    def _index_file(self, file_path: str, dtype: str):
         if not os.path.exists(file_path):
-            logger.warning(f"{file_path} not found.")
+            logger.warning(f"⚠️ Missing file: {file_path}")
             return
 
         try:
             df = pd.read_csv(file_path)
+
+            # ensure eco_score exists (default = 7)
+            if "eco_score" not in df.columns:
+                df["eco_score"] = 7.5
+
+            # ensure price column exists
+            if "price" not in df.columns and "price_per_night" not in df.columns:
+                df["price"] = 0
+
             points = []
 
             for _, row in df.iterrows():
                 payload = row.to_dict()
-                payload["data_type"] = data_type
 
-                # Normalize cost
-                payload["cost"] = (
-                    payload.get("price_per_night")
-                    or payload.get("price")
-                    or payload.get("entry_fee")
-                    or 0
+                payload["data_type"] = dtype
+
+                payload["cost"] = self._safe_get(
+                    row, ["price_per_night", "price", "entry_fee"], 0
                 )
 
-                payload["cost_type"] = "per_night" if "price_per_night" in payload else "one_time"
+                payload["cost_type"] = (
+                    "per_night" if "price_per_night" in row else "one_time"
+                )
 
-                if "image_url" not in payload or not payload["image_url"]:
+                if "image_url" not in payload or pd.isna(payload["image_url"]):
                     payload["image_url"] = "https://placehold.co/100x100/grey"
 
-                # Create embedding
-                text = f"{data_type} - {payload.get('name','')} - {payload.get('description','')}"
+                text = f"{dtype} - {payload.get('name','')} - {payload.get('description','')}"
                 embedding = self.embedder.encode(text)
 
                 points.append(
                     models.PointStruct(
                         id=str(uuid4()),
                         vector=embedding,
-                        payload=payload,
+                        payload=payload
                     )
                 )
 
             if points:
-                self.client.upsert(
-                    collection_name=COLLECTION,
-                    points=points,
-                    wait=True,
-                )
-                print(f"Indexed {len(points)} items → {file_path}")
+                self.client.upsert(COLLECTION, points, wait=True)
+                print(f"✅ Indexed {len(points)} → {file_path}")
 
         except Exception as e:
-            logger.exception(f"Indexing failed for {file_path}: {e}")
+            logger.exception(f"❌ Error indexing {file_path}: {e}")
 
-    # -----------------------------------------------------
-    def _index_all(self) -> None:
-        self._index_file("data/hotels.csv", "Hotel")
-        self._index_file("data/activities.csv", "Activity")
-        self._index_file("data/places.csv", "Place")
 
-    # -----------------------------------------------------
+    # ---------------------------------------------------------
+    def _index_all(self):
+
+        print("📦 Indexing ALL data files...")
+
+        files = {
+            "Hotel": "data/hotels.csv",
+            "Activity": "data/activities.csv",
+            "Place": "data/places.csv",
+            "Food": "data/food.csv",
+            "Nightlife": "data/nightlife.csv",
+            "Shopping": "data/shopping.csv",
+            "Transport": "data/transport.csv",
+        }
+
+        for dtype, fpath in files.items():
+            self._index_file(fpath, dtype)
+
+        print("🎉 ALL DATA INDEXED SUCCESSFULLY")
+
+
+    # ---------------------------------------------------------
     def search(self, query: str, top_k: int = 10, min_eco_score: float = 7.0):
-        feedback_ratings = {}
-
-        if os.path.exists(FEEDBACK_FILE):
-            try:
-                df = pd.read_csv(FEEDBACK_FILE)
-                if not df.empty:
-                    feedback_ratings = df.groupby("item_name")["rating"].mean().to_dict()
-            except Exception:
-                pass
 
         try:
-            query_vector = self.embedder.encode(query)
+            qvec = self.embedder.encode(query)
 
             eco_filter = models.Filter(
                 must=[
                     models.FieldCondition(
                         key="eco_score",
-                        range=models.Range(gte=min_eco_score),
+                        range=models.Range(gte=min_eco_score)
                     )
                 ]
             )
 
             results = self.client.search(
                 collection_name=COLLECTION,
-                query_vector=query_vector,
+                query_vector=qvec,
                 query_filter=eco_filter,
                 limit=top_k,
-                with_payload=True,
+                with_payload=True
             ) or []
 
             output = []
             for hit in results:
                 p = dict(hit.payload or {})
-                name = p.get("name", "")
-                p["avg_rating"] = round(feedback_ratings.get(name, 4.0), 1)
+                p["avg_rating"] = round(p.get("avg_rating", 4.0), 1)
                 output.append(p)
 
             return output
 
         except Exception as e:
-            logger.exception(f"Qdrant search failed: {e}")
+            logger.exception(f"❌ Search failed: {e}")
             return []
