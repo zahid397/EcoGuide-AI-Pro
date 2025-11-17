@@ -2,22 +2,21 @@ import os
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-# ✅ FIXED: correct import (previously was: from backend.utils import extract_json)
-from utils.env_validator import extract_json
+# ✅ CORRECT IMPORT — THIS WAS THE MAIN FIX
+from backend.utils import extract_json
 
 from utils.schemas import ItinerarySchema
 from utils.logger import logger
-import json
 from pydantic import ValidationError
 from typing import Dict, Any, Optional, List
 
 load_dotenv()
 
-# Gemini API config
+# Gemini API setup
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 MODEL_NAME: str = os.getenv("MODEL", "gemini-1.5-flash")
 
-# Safety settings
+# Gemini safety settings
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -27,8 +26,10 @@ safety_settings = [
 
 model = genai.GenerativeModel(MODEL_NAME, safety_settings=safety_settings)
 
-# Load prompts safely
+
+# Load prompts
 def _load_prompt(filename: str) -> str:
+    """Safe loader for prompt files."""
     try:
         with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
             return f.read()
@@ -36,8 +37,9 @@ def _load_prompt(filename: str) -> str:
         logger.error(f"Prompt file not found: {filename}")
         return ""
     except Exception as e:
-        logger.exception(f"Error loading prompt {filename}: {e}")
+        logger.exception(f"Error loading prompt ({filename}): {e}")
         return ""
+
 
 PROMPTS = {
     "itinerary": _load_prompt("itinerary_prompt.txt"),
@@ -51,8 +53,8 @@ PROMPTS = {
 
 class AgentWorkflow:
 
+    # --- Low level LLM call ---
     def _ask(self, prompt: str) -> Optional[str]:
-        """Internal helper — sends text to Gemini."""
         try:
             response = model.generate_content(prompt)
             return response.text
@@ -60,8 +62,8 @@ class AgentWorkflow:
             logger.exception(f"Gemini API call failed: {e}")
             return None
 
+    # --- JSON extraction + validation ---
     def _validate_json_output(self, llm_output: str) -> Optional[Dict[str, Any]]:
-        """Extracts JSON + Pydantic validation."""
         try:
             json_data = extract_json(llm_output)
             if not json_data:
@@ -71,11 +73,12 @@ class AgentWorkflow:
             return validated.model_dump()
 
         except ValidationError as e:
-            logger.error(f"AI Response Schema Validation Failed: {e}")
-            logger.error(f"Raw Output: {llm_output}")
+            logger.error(f"Schema Validation Failed: {e}")
+            logger.error(f"RAW OUTPUT: {llm_output}")
             return None
+
         except Exception as e:
-            logger.exception(f"Failed to parse or validate JSON: {e}")
+            logger.exception(f"Failed to parse/validate JSON: {e}")
             return None
 
     # --- Generate new itinerary ---
@@ -86,8 +89,7 @@ class AgentWorkflow:
         profile_ack = ""
         if user_profile.get("interests"):
             profile_ack = (
-                f"**Profile Note:** User '{user_profile.get('name')}' prefers: "
-                f"{user_profile.get('interests')}. I will prioritize these."
+                f"Note: User '{user_profile.get('name')}' prefers {user_profile.get('interests')}."
             )
 
         prompt = PROMPTS["itinerary"].format(
@@ -104,11 +106,11 @@ class AgentWorkflow:
             rag_data=rag_data
         )
 
-        draft = self._ask(prompt)
-        if draft is None:
+        raw = self._ask(prompt)
+        if raw is None:
             return None
 
-        return self._validate_json_output(draft)
+        return self._validate_json_output(raw)
 
     # --- Refine existing plan ---
     def refine_plan(self, previous_plan_json: str, feedback_query: str,
@@ -127,13 +129,13 @@ class AgentWorkflow:
             budget=budget
         )
 
-        draft = self._ask(prompt)
-        if draft is None:
+        raw = self._ask(prompt)
+        if raw is None:
             return None
 
-        return self._validate_json_output(draft)
+        return self._validate_json_output(raw)
 
-    # --- Premium upgrades ---
+    # --- Upgrades ---
     def get_upgrade_suggestions(self, plan_context: str, user_profile: Dict,
                                 rag_data: List[Dict]) -> str:
 
@@ -145,16 +147,17 @@ class AgentWorkflow:
         response = self._ask(prompt)
         return response or "Unable to generate upgrades."
 
-    # --- Answer user questions ---
+    # --- Q&A about the trip ---
     def ask_question(self, plan_context: str, question: str) -> str:
+
         prompt = PROMPTS["question"].format(
             plan_context=plan_context,
             question=question
         )
         response = self._ask(prompt)
-        return response or "I couldn't answer that question."
+        return response or "Unable to answer."
 
-    # --- Packing list ---
+    # --- Packing List ---
     def generate_packing_list(self, plan_context: str, user_profile: Dict,
                               list_type: str) -> str:
 
@@ -164,13 +167,14 @@ class AgentWorkflow:
             list_type=list_type
         )
         response = self._ask(prompt)
-        return response or "Could not generate packing list."
+        return response or "Unable to generate packing list."
 
-    # --- Travel story ---
+    # --- Story Gen ---
     def generate_story(self, plan_context: str, user_name: str) -> str:
+
         prompt = PROMPTS["story"].format(
             user_name=user_name,
             plan_context=plan_context
         )
         response = self._ask(prompt)
-        return response or "Could not generate story."
+        return response or "Unable to generate story."
