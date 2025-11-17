@@ -1,0 +1,6 @@
+name,location,eco_score,description,price,data_type,cost_type,avg_rating,image_url,tag
+Hive Eco Lounge,Dubai,8.5,Rooftop lounge using solar lighting and no-plastic policy,30,Nightlife,one_time,4.3,https://images.unsplash.com/photo-1556710374-01a675bc3510?auto=format&fit=crop&w=100&q=60,
+Sky Organic Rooftop,Dubai,9.0,Organic cocktails using locally sourced herbs,40,Nightlife,one_time,4.6,https://images.unsplash.com/photo-1544148103-9e74a3a2a020?auto=format&fit=crop&w=100&q=60,
+Abu Dhabi Beach Nightfire,Abu Dhabi,8.7,Low-waste beach nightlife with eco-lighting,25,Nightlife,one_time,4.4,https://images.unsplash.com/photo-1544148103-9e74a3a2a020?auto=format&fit=crop&w=100&q=60,
+Sharjah Silent Night Fest,Sharjah,8.9,Silent-disco style low-noise eco event,20,Nightlife,one_time,4.5,https://images.unsplash.com/photo-1556710374-01a675bc3510?auto=format&fit=crop&w=100&q=60,hidden_gem
+Eco Mixology Bar,Dubai,9.1,Sustainable bar using compostable cups & zero waste,35,Nightlife,one_time,4.7,https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=100&q=60,
