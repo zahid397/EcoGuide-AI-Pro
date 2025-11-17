@@ -1,0 +1,10 @@
+streamlit
+pandas
+python-dotenv
+qdrant-client
+sentence-transformers
+google-generativeai
+fpdf2
+gtts
+plotly
+pydantic
