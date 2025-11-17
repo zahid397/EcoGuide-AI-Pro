@@ -5,90 +5,94 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from uuid import uuid4
 from utils.logger import logger
 
+
 COLLECTION = "eco_travel_v3"
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "..", "data")
 
-
-# ---------------------- TF-IDF Embedder ----------------------
+# ---------------------------------------------------------
+# SAFE EMBEDDER (Cloud Safe – No Torch)
+# ---------------------------------------------------------
 class SafeEmbedder:
     def __init__(self):
         self.vectorizer = TfidfVectorizer(max_features=384)
+        self.is_fitted = False
 
     def fit(self, texts):
         try:
             self.vectorizer.fit(texts)
+            self.is_fitted = True
         except:
             pass
 
     def encode(self, text):
+        if not self.is_fitted:
+            self.fit([text])
+
         try:
-            v = self.vectorizer.transform([text]).toarray()
+            vec = self.vectorizer.transform([text]).toarray()[0]
         except:
             self.fit([text])
-            v = self.vectorizer.transform([text]).toarray()
-        return v[0].tolist()
+            vec = self.vectorizer.transform([text]).toarray()[0]
+
+        return vec.tolist()
 
 
-# ---------------------- RAG Engine ----------------------
+# ---------------------------------------------------------
+# RAG ENGINE
+# ---------------------------------------------------------
 class RAGEngine:
     def __init__(self):
-        # Delete old qdrant folder if locked
-        if os.path.exists("qdrant_local/lock"):
-            import shutil
-            shutil.rmtree("qdrant_local", ignore_errors=True)
-
-        # Start local Qdrant storage
         self.client = QdrantClient(path="qdrant_local")
-
         self.embedder = SafeEmbedder()
-        self._ensure_collection()
-        self._index_all()
 
+        existing = [c.name for c in self.client.get_collections().collections]
 
-    # Create collection if missing
-    def _ensure_collection(self):
-        try:
-            collections = self.client.get_collections().collections
-            names = [c.name for c in collections]
-        except:
-            names = []
+        if COLLECTION not in existing:
+            self._init_collection()
+            self._index_all()
 
-        if COLLECTION not in names:
-            self.client.recreate_collection(
-                collection_name=COLLECTION,
-                vectors_config=models.VectorParams(
-                    size=384,
-                    distance=models.Distance.COSINE
-                )
+    # -----------------------------------------------------
+    def _init_collection(self):
+        self.client.recreate_collection(
+            collection_name=COLLECTION,
+            vectors_config=models.VectorParams(
+                size=384,
+                distance=models.Distance.COSINE
             )
+        )
 
-
-    # ---------------------- Index File ----------------------
-    def _index_file(self, filename, data_type):
-
-        file_path = os.path.join(DATA_DIR, filename)
-
+    # -----------------------------------------------------
+    def _index_file(self, file_path, data_type):
         if not os.path.exists(file_path):
-            logger.error(f"❌ Missing CSV: {file_path}")
+            logger.warning(f"Missing CSV: {file_path}")
             return
 
         df = pd.read_csv(file_path)
+        df.fillna("", inplace=True)
+
+        texts = []
         points = []
 
+        # Build corpus for global TFIDF fit
+        for _, row in df.iterrows():
+            text = f"{row.get('name','')} {row.get('location','')} {row.get('description','')} {data_type}"
+            texts.append(text)
+
+        # Fit once
+        self.embedder.fit(texts)
+
+        # Create vectors
         for _, row in df.iterrows():
             payload = row.to_dict()
             payload["data_type"] = data_type
-            payload["eco_score"] = float(payload.get("eco_score", 0))
 
-            text = (
-                f"{payload.get('name','')} "
-                f"{payload.get('location','')} "
-                f"{payload.get('description','')} "
-                f"{data_type}"
-            )
+            # Save eco_score as float
+            try:
+                payload["eco_score"] = float(payload.get("eco_score", 0))
+            except:
+                payload["eco_score"] = 0
 
+            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')} {data_type}"
             emb = self.embedder.encode(text)
 
             points.append(
@@ -101,43 +105,40 @@ class RAGEngine:
 
         if points:
             self.client.upsert(collection_name=COLLECTION, points=points)
-            print(f"Indexed {len(points)} from {filename}")
+            print(f"Indexed {len(points)} items from {file_path}")
 
-
-    # ---------------------- Index ALL ----------------------
+    # -----------------------------------------------------
     def _index_all(self):
-        print("Indexing data...")
+        print("Indexing started...")
+        self._index_file("data/hotels.csv", "Hotel")
+        self._index_file("data/activities.csv", "Activity")
+        self._index_file("data/places.csv", "Place")
+        print("Indexing finished!")
 
-        self._index_file("hotels.csv", "Hotel")
-        self._index_file("activities.csv", "Activity")
-        self._index_file("places.csv", "Place")
-
-
-    # ---------------------- SEARCH ----------------------
-    def search(self, query, top_k=20, min_eco_score=7.0):
-
+    # -----------------------------------------------------
+    def search(self, query, top_k=10, min_eco_score=7.0):
         try:
-            vector = self.embedder.encode(query)
+            query_vec = self.embedder.encode(query)
 
             eco_filter = models.Filter(
                 must=[
                     models.FieldCondition(
                         key="eco_score",
-                        range=models.Range(gte=min_eco_score)
+                        range=models.Range(gte=float(min_eco_score))
                     )
                 ]
             )
 
             results = self.client.search(
                 collection_name=COLLECTION,
-                query_vector=vector,
+                query_vector=query_vec,
                 query_filter=eco_filter,
                 limit=top_k,
                 with_payload=True
-            ) or []
+            )
 
-            return [hit.payload for hit in results]
+            return [hit.payload for hit in (results or [])]
 
         except Exception as e:
-            logger.error(f"Search failed: {e}")
+            logger.exception(f"Search failed: {e}")
             return []
