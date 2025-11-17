@@ -7,100 +7,98 @@ from typing import List, Dict, Any, Optional
 from utils.logger import logger
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+
 load_dotenv()
 
-COLLECTION: str = "eco_travel_v3"
-QDRANT_URL: Optional[str] = os.getenv("QDRANT_URL")
-QDRANT_API_KEY: Optional[str] = os.getenv("QDRANT_API_KEY")
-FEEDBACK_FILE: str = "data/feedback.csv"
+COLLECTION = "eco_travel_v3"
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+FEEDBACK_FILE = "data/feedback.csv"
 
 
 # ---------------------------------------------------------
-# SAFE EMBEDDER (No Torch, No GPU)
+# SAFE EMBEDDER (TF-IDF based)
 # ---------------------------------------------------------
 class SafeEmbedder:
     def __init__(self):
         self.vectorizer = TfidfVectorizer(max_features=384)
+        self.fitted = False
 
     def fit(self, texts: List[str]):
         try:
             self.vectorizer.fit(texts)
-        except Exception:
-            pass
+            self.fitted = True
+        except Exception as e:
+            logger.exception(f"Embedder fit failed: {e}")
 
     def encode(self, text: str):
-        try:
-            vec = self.vectorizer.transform([text]).toarray()
-        except Exception:
+        if not self.fitted:
+            # Prevent empty vocabulary error
             self.fit([text])
-            vec = self.vectorizer.transform([text]).toarray()
-        return vec[0].tolist()
+
+        try:
+            return self.vectorizer.transform([text]).toarray()[0].tolist()
+        except:
+            return [0.0] * 384
 
 
 # ---------------------------------------------------------
 class RAGEngine:
-    client: QdrantClient
-    embedder: SafeEmbedder
-    vector_size: int = 384
-
-    def __init__(self) -> None:
+    def __init__(self):
         if not QDRANT_URL:
-            raise EnvironmentError("QDRANT_URL is missing.")
+            raise EnvironmentError("QDRANT_URL missing")
         if not QDRANT_API_KEY:
-            logger.warning("QDRANT_API_KEY missing! Required for Qdrant Cloud.")
+            logger.warning("QDRANT_API_KEY missing")
 
+        self.client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            timeout=60,
+            https=True,
+            prefer_grpc=False
+        )
+
+        self.embedder = SafeEmbedder()
+
+        # check collection exist
         try:
-            self.client = QdrantClient(
-                url=QDRANT_URL,
-                api_key=QDRANT_API_KEY,
-                timeout=60,
-                https=True,
-                prefer_grpc=False
-            )
+            existing = [c.name for c in self.client.get_collections().collections]
+        except:
+            existing = []
 
-            self.embedder = SafeEmbedder()
-
-            # Check collection exists
-            try:
-                collections = self.client.get_collections().collections
-                existing = [c.name for c in collections]
-            except Exception:
-                existing = []
-
-            if COLLECTION not in existing:
-                self._init_collection()
-                self._index_all()
-
-        except Exception as e:
-            logger.exception(f"Failed to initialize RAGEngine: {e}")
-            raise
+        if COLLECTION not in existing:
+            self._init_collection()
+            self._index_all()
 
 
-    # -----------------------------------------------------
-    def _init_collection(self) -> None:
+    # ---------------------------------------------------------
+    def _init_collection(self):
         self.client.recreate_collection(
             collection_name=COLLECTION,
             vectors_config=models.VectorParams(
-                size=self.vector_size,
+                size=384,
                 distance=models.Distance.COSINE,
             ),
         )
 
 
-    # -----------------------------------------------------
-    def _index_file(self, file_path: str, data_type: str) -> None:
+    # ---------------------------------------------------------
+    def _index_file(self, file_path: str, data_type: str):
         if not os.path.exists(file_path):
-            logger.warning(f"{file_path} not found.")
+            logger.warning(f"{file_path} not found")
             return
 
         try:
             df = pd.read_csv(file_path)
+            texts_for_fit = []
+
             points = []
 
             for _, row in df.iterrows():
                 payload = row.to_dict()
                 payload["data_type"] = data_type
 
+                # standardize cost fields
                 payload["cost"] = (
                     payload.get("price_per_night") or
                     payload.get("price") or
@@ -114,9 +112,19 @@ class RAGEngine:
                 if "image_url" not in payload:
                     payload["image_url"] = "https://placehold.co/100x100/grey"
 
-                embedding = self.embedder.encode(
-                    f"{data_type} - {payload.get('name','')} - {payload.get('description','')}"
-                )
+                text = f"{data_type} {payload.get('name','')} {payload.get('description','')}"
+                texts_for_fit.append(text)
+
+            # FIRST fit the embedder
+            self.embedder.fit(texts_for_fit)
+
+            # THEN generate embeddings
+            for _, row in df.iterrows():
+                payload = row.to_dict()
+                payload["data_type"] = data_type
+
+                text = f"{data_type} {payload.get('name','')} {payload.get('description','')}"
+                embedding = self.embedder.encode(text)
 
                 points.append(
                     models.PointStruct(
@@ -127,37 +135,23 @@ class RAGEngine:
                 )
 
             if points:
-                self.client.upsert(
-                    collection_name=COLLECTION,
-                    points=points,
-                    wait=True
-                )
+                self.client.upsert(COLLECTION, points, wait=True)
                 print(f"Indexed {len(points)} items from {file_path}")
 
         except Exception as e:
             logger.exception(f"Indexing failed for {file_path}: {e}")
 
 
-    # -----------------------------------------------------
-    def _index_all(self) -> None:
-        print("Indexing data sources...")
+    # ---------------------------------------------------------
+    def _index_all(self):
+        print("Indexing all CSV files...")
         self._index_file("data/hotels.csv", "Hotel")
         self._index_file("data/activities.csv", "Activity")
         self._index_file("data/places.csv", "Place")
 
 
-    # -----------------------------------------------------
+    # ---------------------------------------------------------
     def search(self, query: str, top_k: int = 10, min_eco_score: float = 7.0):
-        feedback_ratings = {}
-
-        if os.path.exists(FEEDBACK_FILE):
-            try:
-                df = pd.read_csv(FEEDBACK_FILE)
-                if not df.empty:
-                    feedback_ratings = df.groupby("item_name")["rating"].mean().to_dict()
-            except Exception:
-                pass
-
         try:
             query_vector = self.embedder.encode(query)
 
@@ -175,18 +169,17 @@ class RAGEngine:
                 query_vector=query_vector,
                 query_filter=eco_filter,
                 limit=top_k,
-                with_payload=True,
-            ) or []          # ⭐ prevents None crash
+                with_payload=True
+            ) or []
 
             output = []
             for hit in results:
-                p = dict(hit.payload or {})     # ⭐ safe payload
-                name = p.get("name", "")
-                p["avg_rating"] = round(feedback_ratings.get(name, 3.0), 1)
+                p = dict(hit.payload or {})
+                p["avg_rating"] = 4.3  # default
                 output.append(p)
 
             return output
 
         except Exception as e:
-            logger.exception(f"Qdrant search failed: {e}")
+            logger.exception(f"Search failed: {e}")
             return []
