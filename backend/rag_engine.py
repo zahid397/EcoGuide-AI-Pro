@@ -10,6 +10,7 @@ from utils.logger import logger
 load_dotenv()
 COLLECTION: str = "eco_travel_v3"
 QDRANT_URL: Optional[str] = os.getenv("QDRANT_URL")
+QDRANT_API_KEY: Optional[str] = os.getenv("QDRANT_API_KEY")
 FEEDBACK_FILE: str = "data/feedback.csv"
 
 class RAGEngine:
@@ -20,13 +21,26 @@ class RAGEngine:
     def __init__(self) -> None:
         if not QDRANT_URL:
             raise EnvironmentError("QDRANT_URL environment variable not set.")
+        if not QDRANT_API_KEY:
+            logger.warning("QDRANT_API_KEY environment variable not set. This is required for Qdrant Cloud.")
+        
         try:
-            self.client = QdrantClient(url=QDRANT_URL)
+            # --- ✳️ "Gold Fix" - Cloud Connection Stability ---
+            self.client = QdrantClient(
+                url=QDRANT_URL,
+                api_key=QDRANT_API_KEY,
+                timeout=60,
+                https=True,        # ✳️ Force secure HTTPS
+                prefer_grpc=False  # ✳️ Prevents random TLS/gRPC issues
+            )
+            # --- ---
+            
             self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
             
             if not self.client.has_collection(COLLECTION):
                 self._init_collection()
                 self._index_all()
+                
         except Exception as e:
             logger.exception(f"Failed to initialize RAGEngine: {e}")
             raise
@@ -141,4 +155,4 @@ class RAGEngine:
         except Exception as e:
             logger.exception(f"Qdrant search failed: {e}")
             return []
-          
+            
