@@ -14,7 +14,7 @@ def render_sidebar(agent, rag, app_version: str) -> None:
         user_name = st.text_input(
             "Your Name",
             key="user_name",
-            help="Enter your name to load your profile.",
+            help="Enter your name to load your saved profile.",
         )
 
         profile = load_profile(user_name) if user_name else {}
@@ -22,12 +22,14 @@ def render_sidebar(agent, rag, app_version: str) -> None:
         fav_interests = st.multiselect(
             "My Favorite Interests",
             ["Beach", "History", "Adventure", "Food", "Nature"],
-            default=profile.get("interests", ["Adventure"]),   # ⭐ FIX 1: Always non-empty
+            default=profile.get("interests", []),
         )
 
         pref_budget = st.slider(
-            "My Usual Budget ($)", 100, 5000,
-            profile.get("budget", 1000), 100
+            "My Usual Budget ($)",
+            100, 5000,
+            profile.get("budget", 1000),
+            100,
         )
 
         # Save Profile
@@ -35,8 +37,12 @@ def render_sidebar(agent, rag, app_version: str) -> None:
             if not user_name or len(user_name) < 2:
                 st.error("Name must be at least 2 characters.")
             else:
-                save_profile(user_name, fav_interests, pref_budget)
-                st.success("Profile Saved!")
+                try:
+                    save_profile(user_name, fav_interests, pref_budget)
+                    st.success("Profile Saved!")
+                except Exception as e:
+                    logger.exception(e)
+                    st.error(f"Failed to save profile: {e}")
 
         st.divider()
 
@@ -48,47 +54,44 @@ def render_sidebar(agent, rag, app_version: str) -> None:
         st.subheader("Trip Priorities")
 
         priorities = {
-            "eco": st.slider("🟩 Eco Priority", 1, 10, 8),
-            "budget": st.slider("🟥 Budget Priority", 1, 10, 6),
-            "comfort": st.slider("🟧 Comfort Priority", 1, 10, 5),
+            "eco": st.slider("🟩 Eco Priority", 1, 10, 8, key="p_eco"),
+            "budget": st.slider("🟥 Budget Priority", 1, 10, 6, key="p_budget"),
+            "comfort": st.slider("🟧 Comfort Priority", 1, 10, 5, key="p_comfort"),
         }
 
-        # ⭐ FIX 1: trip_interest always has at least 1 value
-        st.multiselect(
+        trip_interests = st.multiselect(
             "Interests for this trip",
             ["Beach", "History", "Adventure", "Food", "Nature"],
-            default=profile.get("interests", ["Adventure"]),
+            default=profile.get("interests", []),
             key="trip_interests",
         )
 
-        st.slider(
-            "Total Budget ($)", 100, 10000,
+        trip_budget = st.slider(
+            "Total Budget ($)",
+            100,
+            10000,
             profile.get("budget", 1500),
             100,
             key="trip_budget",
         )
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.number_input("Number of Days", 1, 30, 3, key="trip_days")
-        with col2:
-            st.number_input("Number of Travelers", 1, 20, 1, key="trip_travelers")
+        days = st.number_input("Number of Days", 1, 30, 3, key="trip_days")
+        travelers = st.number_input("Travelers", 1, 20, 1, key="trip_travelers")
 
-        st.selectbox("Base Location",
-                     ["Dubai", "Abu Dhabi", "Sharjah"],
-                     key="trip_location")
+        location = st.selectbox(
+            "Base Location",
+            ["Dubai", "Abu Dhabi", "Sharjah"],
+            key="trip_location",
+        )
 
-        # ⭐ FIX 2: Eco minimum lowered (previously 8.0 → too strict)
-        st.slider(
+        min_eco = st.slider(
             "Minimum Eco Score",
-            7.0, 9.5,
-            7.5,     # better results
-            0.1,
-            key="trip_min_eco",
+            7.0, 9.5, 7.5, 0.1,
+            key="trip_min_eco"
         )
 
         # -------------------------
-        # GENERATE BUTTON
+        # GENERATE PLAN BUTTON
         # -------------------------
         if st.button("Generate Plan 🚀", use_container_width=True):
 
@@ -96,59 +99,63 @@ def render_sidebar(agent, rag, app_version: str) -> None:
                 st.error("Please enter your name first.")
                 return
 
-            if not st.session_state.trip_interests:
-                st.error("Please select at least one interest.")
+            if not trip_interests:
+                st.error("Select at least one interest.")
                 return
 
-            # Clear old data
-            st.session_state.itinerary = None
+            _clear_session()
 
             with st.status("Generating your eco-friendly trip...", expanded=True) as status:
                 try:
-                    status.write("🧠 Step 1: Building your travel query...")
-
+                    status.write("🧠 Step 1: Building query...")
                     query = (
-                        f"{st.session_state.trip_days}-day trip to "
-                        f"{st.session_state.trip_location} for "
-                        f"{st.session_state.trip_travelers} people. "
-                        f"Interests: {', '.join(st.session_state.trip_interests)}"
+                        f"{days}-day trip to {location} for {travelers} people. "
+                        f"Interests: {', '.join(trip_interests)}"
                     )
 
-                    status.write("🔍 Step 2: Searching eco-friendly spots...")
+                    status.write("🔍 Step 2: Searching eco-friendly places...")
                     rag_results = rag.search(
                         query=query,
                         top_k=15,
-                        min_eco_score=st.session_state.trip_min_eco,
+                        min_eco_score=min_eco,
                     )
 
                     if not rag_results:
-                        status.update("No eco-friendly results found.", state="error")
+                        status.update(label="❌ No eco-friendly results found.", state="error")
                         return
 
-                    status.write("🤖 Step 3: Creating itinerary using AI...")
+                    status.write("🤖 Step 3: Creating Itinerary with AI...")
                     itinerary = agent.run(
                         query=query,
                         rag_data=rag_results,
-                        budget=st.session_state.trip_budget,
-                        interests=st.session_state.trip_interests,
-                        days=st.session_state.trip_days,
-                        location=st.session_state.trip_location,
-                        travelers=st.session_state.trip_travelers,
+                        budget=trip_budget,
+                        interests=trip_interests,
+                        days=days,
+                        location=location,
+                        travelers=travelers,
                         user_profile=profile,
                         priorities=priorities,
                     )
 
                     if itinerary:
                         st.session_state.itinerary = itinerary
-                        status.update("✅ Done!", state="complete")
-                        st.toast("Your Eco-Trip Plan is Ready! 🌍✨")
+                        status.update(label="✅ Done!", state="complete")
+                        st.toast("Plan Ready! 🌍✨")
                     else:
-                        status.update("AI failed to respond.", state="error")
+                        status.update(label="AI failed to generate plan.", state="error")
 
                 except Exception as e:
-                    logger.exception(f"Generation failed: {e}")
-                    status.update("Error occurred.", state="error")
+                    logger.exception(e)
+                    status.update(label="Error occurred.", state="error")
                     st.error(str(e))
 
         st.divider()
         st.caption(f"EcoGuide AI — Version {app_version}")
+
+
+def _clear_session():
+    st.session_state.itinerary = None
+    st.session_state.chat_history = []
+    st.session_state.packing_list = {}
+    st.session_state.travel_story = ""
+    st.session_state.upgrade_suggestions = ""
