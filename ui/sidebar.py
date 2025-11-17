@@ -1,3 +1,4 @@
+
 import streamlit as st
 from utils.profile import load_profile, save_profile
 from utils.logger import logger
@@ -18,7 +19,7 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
 
         user_name = st.text_input(
             "Your Name",
-            value=st.session_state.get("user_name", ""),   # ✅ FIX
+            value=st.session_state.get("user_name", ""),   # safe read
             key="user_name_input",
             help="Enter your name to save and load your personal profile."
         )
@@ -115,7 +116,7 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
                     )
 
                     if not rag_results:
-                        status.update("❌ No eco-friendly results found.", state="error")
+                        status.update(label="❌ No eco-friendly results found.", state="error")
                         return
 
                     status.write("🤖 Step 3: Creating itinerary...")
@@ -134,24 +135,24 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
 
                     if itinerary:
                         _set_session_state_on_generate(itinerary, query, priorities)
-                        status.update("✅ Done!", state="complete")
+                        status.update(label="✅ Done!", state="complete")
                         st.toast("Your eco-trip plan is ready! 🌍✨")
                         time.sleep(0.5)
                     else:
-                        status.update("AI failed to generate.", state="error")
+                        status.update(label="AI failed to generate.", state="error")
 
                 except Exception as e:
                     logger.exception(e)
-                    status.update("Error occurred.", state="error")
+                    status.update(label="Error occurred.", state="error")
                     st.error(str(e))
 
         st.divider()
         st.caption(f"EcoGuide AI — Version {app_version}")
 
 
-def _validate_inputs():
-    return True
-
+# -----------------------------------------
+# Helpers
+# -----------------------------------------
 
 def _clear_session_state():
     st.session_state.itinerary = None
@@ -165,12 +166,12 @@ def _build_query_and_profile():
     priorities = {
         "eco": st.session_state.trip_eco_priority,
         "budget": st.session_state.trip_budget_priority,
-        "comfort": st.session_state.trip_comfort_priority
+        "comfort": st.session_state.trip_comfort_priority,
     }
 
     query = (
-        f"A {st.session_state.trip_days}-day trip to {st.session_state.trip_location} "
-        f"for {st.session_state.trip_travelers} people, focusing on "
+        f"A {st.session_state.trip_days}-day trip to {st.session_state.trip_location}"
+        f" for {st.session_state.trip_travelers} people, focusing on "
         f"{', '.join(st.session_state.trip_interests)}."
     )
 
