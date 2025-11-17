@@ -1,0 +1,11 @@
+name,location,eco_score,description,price,data_type,cost_type,avg_rating,image_url,tag
+Wild & The Moon,Dubai,9.0,Organic plant-based restaurant with zero-plastic policy,20,Food,one_time,4.7,https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?auto=format&fit=crop&w=100&q=60,
+The Sum of Us,Dubai,8.6,House-roasted coffee with sustainable bakery,15,Food,one_time,4.5,https://images.unsplash.com/photo-1473093226795-af9932fe5856?auto=format&fit=crop&w=100&q=60,
+SEVA Table,Dubai,9.4,Vegan oasis with organic garden and holistic meals,25,Food,one_time,4.8,https://images.unsplash.com/photo-1556911073-52527ac437f5?auto=format&fit=crop&w=100&q=60,hidden_gem
+Comptoir 102,Dubai,9.1,Solar-powered concept café serving organic food,30,Food,one_time,4.6,https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=100&q=60,
+Bounty Beets,Dubai,8.7,Healthy eco-friendly café with plant-based menu,18,Food,one_time,4.4,https://images.unsplash.com/photo-1559718062-1ce5860cf0eb?auto=format&fit=crop&w=100&q=60,
+Jungle Fever Café,Abu Dhabi,8.5,Tropical vegan restaurant with composting program,20,Food,one_time,4.3,https://images.unsplash.com/photo-1544148103-9e74a3a2a020?auto=format&fit=crop&w=100&q=60,
+Sanderson’s Café,Abu Dhabi,9.0,Zero-waste café with reclaimed-wood interiors,22,Food,one_time,4.7,https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=100&q=60,
+Shakespeare Eco Bistro,Sharjah,8.3,Local eco-restaurant using sustainable packaging,16,Food,one_time,4.2,https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=100&q=60,
+Healthy Greens Sharjah,Sharjah,8.8,Farm-to-table meals prepared with organic produce,18,Food,one_time,4.5,https://images.unsplash.com/photo-1547592166-23ac45744acd?auto=format&fit=crop&w=100&q=60,
+Green Basket Café,Sharjah,9.1,Herbal and plant-based café using rooftop garden,17,Food,one_time,4.6,https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?auto=format&fit=crop&w=100&q=60,hidden_gem
