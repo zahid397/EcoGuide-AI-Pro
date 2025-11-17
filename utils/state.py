@@ -1,21 +1,30 @@
 import streamlit as st
 
-def init_session_state():
-    """Initialize session state variables safely."""
-    
+def init_session_state() -> None:
+    """Initializes all required session_state keys safely."""
+
     defaults = {
-        "chat_history": [],
-        "generated_plan": None,
+        "user_name": "",
+        "user_location": "",
+        "trip_days": 3,
+        "num_travelers": 1,
+        "budget": 500,
+        "interests": [],
+        "preferences": {},
+        "travel_plan": None,
         "rag_results": [],
-        "last_query": "",
-        "user_profile": {
+        "feedback": "",
+        "upgrade_suggestions": "",
+        "packing_list": "",
+        "travel_story": "",
+        "profile": {
             "name": "User",
-            "interests": []
+            "interests": [],
         },
         "priorities": {
             "eco": 5,
             "budget": 5,
-            "comfort": 5
+            "comfort": 5,
         }
     }
 
