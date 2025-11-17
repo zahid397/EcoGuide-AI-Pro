@@ -4,6 +4,7 @@ from utils.logger import logger
 
 
 def render_sidebar(agent, rag, app_version: str) -> None:
+
     with st.sidebar:
 
         # -------------------------
@@ -32,7 +33,6 @@ def render_sidebar(agent, rag, app_version: str) -> None:
             100,
         )
 
-        # Save Profile
         if st.button("Save Profile", use_container_width=True):
             if not user_name or len(user_name) < 2:
                 st.error("Name must be at least 2 characters.")
@@ -50,7 +50,6 @@ def render_sidebar(agent, rag, app_version: str) -> None:
         # TRIP BUILDER
         # -------------------------
         st.header("📍 Plan a New Trip")
-
         st.subheader("Trip Priorities")
 
         priorities = {
@@ -75,18 +74,33 @@ def render_sidebar(agent, rag, app_version: str) -> None:
             key="trip_budget",
         )
 
-        days = st.number_input("Number of Days", 1, 30, 3, key="trip_days")
-        travelers = st.number_input("Travelers", 1, 20, 1, key="trip_travelers")
+        days = st.number_input(
+            "Number of Days",
+            min_value=1,
+            max_value=30,
+            value=3,
+            key="trip_days"
+        )
+
+        travelers = st.number_input(
+            "Travelers",
+            min_value=1,
+            max_value=20,
+            value=1,
+            key="trip_travelers"
+        )
 
         location = st.selectbox(
             "Base Location",
             ["Dubai", "Abu Dhabi", "Sharjah"],
-            key="trip_location",
+            key="trip_location"
         )
 
         min_eco = st.slider(
             "Minimum Eco Score",
-            7.0, 9.5, 7.5, 0.1,
+            7.0, 9.5,
+            7.5,
+            step=0.1,
             key="trip_min_eco"
         )
 
@@ -108,12 +122,14 @@ def render_sidebar(agent, rag, app_version: str) -> None:
             with st.status("Generating your eco-friendly trip...", expanded=True) as status:
                 try:
                     status.write("🧠 Step 1: Building query...")
+
                     query = (
                         f"{days}-day trip to {location} for {travelers} people. "
                         f"Interests: {', '.join(trip_interests)}"
                     )
 
                     status.write("🔍 Step 2: Searching eco-friendly places...")
+
                     rag_results = rag.search(
                         query=query,
                         top_k=15,
@@ -124,7 +140,8 @@ def render_sidebar(agent, rag, app_version: str) -> None:
                         status.update(label="❌ No eco-friendly results found.", state="error")
                         return
 
-                    status.write("🤖 Step 3: Creating Itinerary with AI...")
+                    status.write("🤖 Step 3: Creating itinerary with AI...")
+
                     itinerary = agent.run(
                         query=query,
                         rag_data=rag_results,
@@ -142,11 +159,11 @@ def render_sidebar(agent, rag, app_version: str) -> None:
                         status.update(label="✅ Done!", state="complete")
                         st.toast("Plan Ready! 🌍✨")
                     else:
-                        status.update(label="AI failed to generate plan.", state="error")
+                        status.update(label="⚠️ AI failed to generate plan.", state="error")
 
                 except Exception as e:
                     logger.exception(e)
-                    status.update(label="Error occurred.", state="error")
+                    status.update(label="⚠️ An error occurred.", state="error")
                     st.error(str(e))
 
         st.divider()
