@@ -8,53 +8,56 @@ from utils.logger import logger
 COLLECTION = "eco_travel_v3"
 
 
-# =====================================================
-#  SAFE EMBEDDER (Always returns EXACT 384 dims)
-# =====================================================
+# -------------------------------
+# Safe TF-IDF Embedder
+# -------------------------------
 class SafeEmbedder:
     def __init__(self):
         self.vectorizer = TfidfVectorizer(max_features=384)
-        self.fitted = False
 
     def fit(self, texts):
         try:
             self.vectorizer.fit(texts)
-            self.fitted = True
         except:
-            self.fitted = False
+            pass
 
     def encode(self, text):
         try:
-            if not self.fitted:
-                self.fit([text])
+            vec = self.vectorizer.transform([text]).toarray()
+        except:
+            self.fit([text])
+            vec = self.vectorizer.transform([text]).toarray()
 
-            vec = self.vectorizer.transform([text]).toarray()[0]
+        # FIX shape mismatch
+        v = vec[0].tolist()
+        if len(v) < 384:
+            v += [0] * (384 - len(v))
+        elif len(v) > 384:
+            v = v[:384]
 
-            # 🔥 Force vector to exactly 384 dimensions
-            if len(vec) < 384:
-                vec = list(vec) + [0.0] * (384 - len(vec))
-            else:
-                vec = vec[:384]
-
-            return vec
-
-        except Exception:
-            # Fallback (never crashes)
-            return [0.0] * 384
+        return v
 
 
-# =====================================================
-#  RAG ENGINE
-# =====================================================
+# -------------------------------
+# RAG Engine
+# -------------------------------
 class RAGEngine:
     def __init__(self):
-        self.client = QdrantClient(path="qdrant_local")   # Local Qdrant
+        # ---- FIX: unique Qdrant folder to avoid locking on Streamlit ----
+        storage_path = f"qdrant_store_{uuid4().hex}"
+
+        try:
+            self.client = QdrantClient(path=storage_path)
+        except Exception as e:
+            logger.exception(f"Qdrant init failed: {e}")
+            raise
+
         self.embedder = SafeEmbedder()
 
-        # Check collection exists
+        # Check existing collections
         try:
-            colls = self.client.get_collections().collections
-            names = [c.name for c in colls]
+            collections = self.client.get_collections().collections
+            names = [c.name for c in collections]
         except:
             names = []
 
@@ -62,7 +65,7 @@ class RAGEngine:
             self._init_collection()
             self._index_all()
 
-    # ----------------------------------------
+    # ------------------------------------
     def _init_collection(self):
         self.client.recreate_collection(
             collection_name=COLLECTION,
@@ -72,10 +75,10 @@ class RAGEngine:
             )
         )
 
-    # ----------------------------------------
+    # ------------------------------------
     def _index_file(self, path, data_type):
         if not os.path.exists(path):
-            logger.error(f"Missing CSV: {path}")
+            logger.error(f"CSV file missing: {path}")
             return
 
         df = pd.read_csv(path)
@@ -85,17 +88,15 @@ class RAGEngine:
             payload = row.to_dict()
             payload["data_type"] = data_type
 
-            # ECO SCORE FIX
             try:
                 payload["eco_score"] = float(payload.get("eco_score", 0))
             except:
-                payload["eco_score"] = 0.0
+                payload["eco_score"] = 0
 
-            # Build embedding text
             text = (
-                f"{payload.get('name', '')} "
-                f"{payload.get('location', '')} "
-                f"{payload.get('description', '')} "
+                f"{payload.get('name','')} "
+                f"{payload.get('location','')} "
+                f"{payload.get('description','')} "
                 f"{data_type}"
             )
 
@@ -110,49 +111,51 @@ class RAGEngine:
             )
 
         if points:
-            self.client.upsert(collection_name=COLLECTION, points=points)
-            print(f"Indexed {len(points)} rows → {path}")
+            try:
+                self.client.upsert(collection_name=COLLECTION, points=points)
+                print(f"Indexed {len(points)} items from {path}")
+            except Exception as e:
+                logger.exception(f"Upsert failed for {path}: {e}")
 
-    # ----------------------------------------
+    # ------------------------------------
     def _index_all(self):
-        print("Indexing all CSV files...")
+        print("Indexing all CSV data...")
 
         self._index_file("data/hotels.csv", "Hotel")
         self._index_file("data/activities.csv", "Activity")
         self._index_file("data/places.csv", "Place")
-        self._index_file("data/nightlife.csv", "Nightlife")
-        self._index_file("data/shopping.csv", "Shopping")
-        self._index_file("data/food.csv", "Food")
-        self._index_file("data/transport.csv", "Transport")
 
-    # ----------------------------------------
+        print("Indexing Complete.")
+
+    # ------------------------------------
     def search(self, query, top_k=10, min_eco_score=7.0):
-        query_vec = self.embedder.encode(query)
-
-        eco_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="eco_score",
-                    range=models.Range(gte=min_eco_score)
-                )
-            ]
-        )
-
         try:
+            qvec = self.embedder.encode(query)
+
+            eco_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="eco_score",
+                        range=models.Range(gte=float(min_eco_score))
+                    )
+                ]
+            )
+
             results = self.client.search(
                 collection_name=COLLECTION,
-                query_vector=query_vec,
+                query_vector=qvec,
                 query_filter=eco_filter,
                 limit=top_k,
                 with_payload=True
             )
+
+            output = []
+            for r in results:
+                payload = dict(r.payload or {})
+                output.append(payload)
+
+            return output
+
         except Exception as e:
-            logger.error(f"Search failed: {e}")
+            logger.exception(f"Search failed: {e}")
             return []
-
-        output = []
-        for r in results:
-            payload = r.payload or {}
-            output.append(payload)
-
-        return output
