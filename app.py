@@ -1,8 +1,8 @@
 import streamlit as st
 import os
-import sys # ✳️ Import sys
+import sys # ✳️ 1. Import sys
 
-# --- ✳️ FIX: Add project root to Python path ---
+# --- ✳️ 2. FIX: Add project root to Python path ---
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
@@ -29,7 +29,7 @@ def main() -> None:
 
     st.title("🌍 EcoGuide AI Pro — Adaptive Travel Planner")
 
-    # --- Fix 5: Environment Validator ---
+    # --- Environment Validator ---
     try:
         validate_env()
     except EnvironmentError as e:
@@ -37,7 +37,7 @@ def main() -> None:
         logger.error(str(e))
         st.stop()
 
-    # --- Fix 2: Load Cached AI & RAG Engines ---
+    # --- Load Cached AI & RAG Engines ---
     try:
         agent = get_agent()
         rag = get_rag()
