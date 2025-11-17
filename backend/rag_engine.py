@@ -19,21 +19,18 @@ FEEDBACK_FILE: str = "data/feedback.csv"
 class SafeEmbedder:
     def __init__(self):
         self.vectorizer = TfidfVectorizer(max_features=384)
-
-    def fit(self, texts: List[str]):
-        try:
-            self.vectorizer.fit(texts)
-        except Exception:
-            pass
+        self.fitted = False
 
     def encode(self, text: str):
         try:
+            if not self.fitted:
+                self.vectorizer.fit([text])
+                self.fitted = True
             vec = self.vectorizer.transform([text]).toarray()
+            return vec[0].tolist()
         except Exception:
-            # first time → fit before transform
-            self.fit([text])
-            vec = self.vectorizer.transform([text]).toarray()
-        return vec[0].tolist()
+            # fallback
+            return [0.0] * 384
 
 
 class RAGEngine:
@@ -57,10 +54,9 @@ class RAGEngine:
                 prefer_grpc=False
             )
 
-            # --------- Replace SentenceTransformer ---------
             self.embedder = SafeEmbedder()
 
-            # Check collection exists
+            # --------- Check collection ---------
             try:
                 collections = self.client.get_collections().collections
                 existing = [c.name for c in collections]
@@ -69,6 +65,10 @@ class RAGEngine:
 
             if COLLECTION not in existing:
                 self._init_collection()
+
+            # Always re-index if empty
+            info = self.client.get_collection(COLLECTION)
+            if info.points_count == 0:
                 self._index_all()
 
         except Exception as e:
@@ -86,6 +86,7 @@ class RAGEngine:
             ),
         )
 
+
     # -----------------------------------------------------
     def _index_file(self, file_path: str, data_type: str) -> None:
         if not os.path.exists(file_path):
@@ -97,15 +98,21 @@ class RAGEngine:
             points = []
 
             for _, row in df.iterrows():
+                name = row.get("name", "").strip()
+                desc = row.get("description", "")
+
+                if not name:
+                    continue
+
                 payload = row.to_dict()
                 payload["data_type"] = data_type
 
-                # Normalized cost
                 payload["cost"] = (
                     payload.get("price_per_night") or
                     payload.get("price") or
                     payload.get("entry_fee") or 0
                 )
+
                 payload["cost_type"] = (
                     "per_night" if "price_per_night" in payload
                     else "one_time"
@@ -114,10 +121,8 @@ class RAGEngine:
                 if "image_url" not in payload:
                     payload["image_url"] = "https://placehold.co/100x100/grey"
 
-                # --------- Safe Vector ---------
-                embedding = self.embedder.encode(
-                    f"{data_type} - {payload.get('name','')} - {payload.get('description','')}"
-                )
+                # --------- Stable embedding ---------
+                embedding = self.embedder.encode(f"{name} {desc} {data_type}")
 
                 points.append(
                     models.PointStruct(
@@ -128,7 +133,7 @@ class RAGEngine:
                 )
 
             if points:
-                self.client.upsert(COLLECTION, points, wait=True)
+                self.client.upsert(collection_name=COLLECTION, points=points, wait=True)
                 print(f"Indexed {len(points)} items from {file_path}")
 
         except Exception as e:
@@ -145,7 +150,7 @@ class RAGEngine:
 
     # -----------------------------------------------------
     def search(self, query: str, top_k: int = 10, min_eco_score: float = 7.0):
-        feedback_ratings = {}
+        feedback_ratings: Dict[str, float] = {}
 
         if os.path.exists(FEEDBACK_FILE):
             try:
@@ -156,7 +161,6 @@ class RAGEngine:
                 pass
 
         try:
-            # safe vector
             query_vector = self.embedder.encode(query)
 
             eco_filter = models.Filter(
@@ -176,6 +180,8 @@ class RAGEngine:
 
             output = []
             for hit in results:
+                if not hit.payload:
+                    continue
                 p = hit.payload
                 name = p.get("name", "")
                 p["avg_rating"] = round(feedback_ratings.get(name, 3.0), 1)
