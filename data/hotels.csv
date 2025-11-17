@@ -1,0 +1,16 @@
+name,location,eco_score,description,price_per_night,data_type,cost_type,avg_rating,image_url,tag
+Fairmont Dubai,Dubai,9.0,Luxury LEED-certified hotel with solar panels and zero-waste program,450,Hotel,per_night,4.5,https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=100&q=60,
+Sofitel Dubai The Palm,Dubai,8.8,Resort using solar energy and turtle conservation programs,400,Hotel,per_night,4.2,https://images.unsplash.com/photo-1564507592333-cdd2aa0775d1?auto=format&fit=crop&w=100&q=60,
+Jumeirah Mina Al Salam,Dubai,9.2,Beachfront eco-resort with mangrove protection and EV charging,550,Hotel,per_night,4.7,https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=100&q=60,
+Avani+ Palm View Dubai,Dubai,8.5,Modern eco-friendly hotel with water conservation features,250,Hotel,per_night,4.3,https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?auto=format&fit=crop&w=100&q=60,
+Atlantis The Palm,Dubai,8.7,Marine conservation focused luxury hotel with energy-efficient design,600,Hotel,per_night,4.6,https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=100&q=60,
+DoubleTree Business Bay,Dubai,8.3,Green Key certified hotel emphasizing sustainability training,350,Hotel,per_night,4.1,https://images.unsplash.com/photo-1564507592333-cdd2aa0775d1?auto=format&fit=crop&w=100&q=60,
+Ecos Dubai Hotel,Dubai,8.6,Affordable eco-stay with strong sustainability features,200,Hotel,per_night,4.4,https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=100&q=60,hidden_gem
+GreenOasis Abu Dhabi,Abu Dhabi,8.2,Hotel with organic farm and renewable energy program,300,Hotel,per_night,4.0,https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?auto=format&fit=crop&w=100&q=60,
+Park Hyatt Abu Dhabi,Abu Dhabi,9.1,Mangrove-integrated resort with biodiversity programs,500,Hotel,per_night,4.8,https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=100&q=60,
+Saadiyat Rotana,Abu Dhabi,8.9,Beachfront resort protecting turtle nesting sites,450,Hotel,per_night,4.5,https://images.unsplash.com/photo-1564507592333-cdd2aa0775d1?auto=format&fit=crop&w=100&q=60,
+Emirates Palace,Abu Dhabi,9.3,Palace hotel using solar energy and heritage gardens,800,Hotel,per_night,4.9,https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=100&q=60,
+DesertBloom Sharjah,Sharjah,7.8,Adventure eco-stay with EV charging,250,Hotel,per_night,3.9,https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?auto=format&fit=crop&w=100&q=60,
+Al Bait Sharjah,Sharjah,8.4,Heritage hotel with natural cooling and zero-waste,300,Hotel,per_night,4.2,https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=100&q=60,hidden_gem
+Boutique Hotel Sharjah,Sharjah,8.1,Cozy boutique eco-hotel with rooftop solar,220,Hotel,per_night,4.1,https://images.unsplash.com/photo-1564507592333-cdd2aa0775d1?auto=format&fit=crop&w=100&q=60,
+Sharjah Heritage Hotel,Sharjah,8.5,Restored heritage building with sustainable design,280,Hotel,per_night,4.3,https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=100&q=60,
