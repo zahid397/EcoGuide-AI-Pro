@@ -1,22 +1,20 @@
 import streamlit as st
 from utils.profile import load_profile, save_profile
 from utils.logger import logger
-from typing import Any
 
 
 def render_sidebar(agent, rag, app_version: str) -> None:
-    """Renders the sidebar UI and handles plan generation."""
     with st.sidebar:
 
         # -------------------------
-        # USER PROFILE SECTION
+        # USER PROFILE
         # -------------------------
         st.header("👤 My Profile")
 
         user_name = st.text_input(
             "Your Name",
             key="user_name",
-            help="Enter your name to load your saved profile.",
+            help="Enter your name to load your profile.",
         )
 
         profile = load_profile(user_name) if user_name else {}
@@ -29,40 +27,44 @@ def render_sidebar(agent, rag, app_version: str) -> None:
 
         pref_budget = st.slider(
             "My Usual Budget ($)", 100, 5000,
-            profile.get("budget", 1000), step=100
+            profile.get("budget", 1000), 100
         )
 
+        # Save Profile
         if st.button("Save Profile", use_container_width=True):
-            if len(user_name) < 2:
+            if not user_name or len(user_name) < 2:
                 st.error("Name must be at least 2 characters.")
             else:
                 save_profile(user_name, fav_interests, pref_budget)
-                st.success("Profile saved successfully!")
+                st.success("Profile Saved!")
 
         st.divider()
 
         # -------------------------
-        # TRIP BUILDER SECTION
+        # TRIP BUILDER
         # -------------------------
         st.header("📍 Plan a New Trip")
+
         st.subheader("Trip Priorities")
 
         priorities = {
-            "eco": st.slider("🟩 Eco Priority", 1, 10, 8, key="eco_priority"),
-            "budget": st.slider("🟥 Budget Priority", 1, 10, 6, key="budget_priority"),
-            "comfort": st.slider("🟧 Comfort Priority", 1, 10, 5, key="comfort_priority"),
+            "eco": st.slider("🟩 Eco Priority", 1, 10, 8),
+            "budget": st.slider("🟥 Budget Priority", 1, 10, 6),
+            "comfort": st.slider("🟧 Comfort Priority", 1, 10, 5),
         }
 
         st.multiselect(
-            "Interests for this Trip",
+            "Interests for this trip",
             ["Beach", "History", "Adventure", "Food", "Nature"],
             default=profile.get("interests", []),
             key="trip_interests",
         )
 
         st.slider(
-            "Total Budget ($)", 100, 10000,
-            profile.get("budget", 1500), step=100,
+            "Total Budget ($)",
+            100, 10000,
+            profile.get("budget", 1500),
+            100,
             key="trip_budget"
         )
 
@@ -75,34 +77,33 @@ def render_sidebar(agent, rag, app_version: str) -> None:
         st.selectbox(
             "Base Location",
             ["Dubai", "Abu Dhabi", "Sharjah"],
-            key="trip_location",
+            key="trip_location"
         )
 
         st.slider(
-            "Minimum Eco Score", 7.0, 9.5, 8.0, step=0.1,
+            "Minimum Eco Score", 7.0, 9.5,
+            8.0, 0.1,
             key="trip_min_eco"
         )
 
         # -------------------------
-        # GENERATE PLAN BUTTON
+        # GENERATE TRIP
         # -------------------------
         if st.button("Generate Plan 🚀", use_container_width=True):
 
             if not user_name:
-                st.error("Please enter your name first.")
+                st.error("Enter your name first.")
                 return
 
             if not st.session_state.trip_interests:
-                st.error("Please select at least one interest.")
+                st.error("Select at least one interest.")
                 return
 
             _clear_session()
 
-            # SAFE STATUS (no expand error)
+            # Streamlit Cloud-safe spinner (no st.status)
             with st.spinner("Generating your eco-friendly trip..."):
-
                 try:
-                    # STEP 1: Build query
                     query = (
                         f"{st.session_state.trip_days}-day trip to "
                         f"{st.session_state.trip_location} for "
@@ -110,7 +111,6 @@ def render_sidebar(agent, rag, app_version: str) -> None:
                         f"Interests: {', '.join(st.session_state.trip_interests)}"
                     )
 
-                    # STEP 2: RAG Search
                     rag_results = rag.search(
                         query=query,
                         top_k=15,
@@ -118,10 +118,9 @@ def render_sidebar(agent, rag, app_version: str) -> None:
                     )
 
                     if not rag_results:
-                        st.error("No eco-friendly places found for this query.")
+                        st.error("No eco-friendly results found.")
                         return
 
-                    # STEP 3: Ask AI to create plan
                     itinerary = agent.run(
                         query=query,
                         rag_data=rag_results,
@@ -137,13 +136,12 @@ def render_sidebar(agent, rag, app_version: str) -> None:
                     if itinerary:
                         st.session_state.itinerary = itinerary
                         st.success("Plan Ready! 🎉")
-                        st.toast("Your eco-trip is ready! 🌍✨")
                     else:
-                        st.error("AI failed to generate the itinerary.")
+                        st.error("AI failed to create itinerary.")
 
                 except Exception as e:
-                    logger.exception(f"Generation failed: {e}")
-                    st.error(f"Error: {e}")
+                    logger.exception(f"Generation Failed: {e}")
+                    st.error(str(e))
 
         st.divider()
         st.caption(f"EcoGuide AI — Version {app_version}")
