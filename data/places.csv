@@ -1,0 +1,21 @@
+name,location,eco_score,description,entry_fee,data_type,cost_type,avg_rating,image_url,tag
+Dubai Creek,Dubai,9.0,Historic eco-waterfront with mangroves,0,Place,one_time,4.5,https://images.unsplash.com/photo-1559827260-dc66d52bef19?auto=format&fit=crop&w=100&q=60,
+Al Fahidi Historic District,Dubai,8.8,Conserved heritage area with eco-design,5,Place,one_time,4.6,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+Dubai Frame Green Deck,Dubai,8.5,Energy-efficient observation deck,20,Place,one_time,4.3,https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=100&q=60,
+Dubai Miracle Garden,Dubai,8.2,Floral park using recycled water,30,Place,one_time,4.4,https://images.unsplash.com/photo-1564507592333-cdd2aa0775d1?auto=format&fit=crop&w=100&q=60,
+Sustainable City,Dubai,9.4,Solar-powered eco-city model,0,Place,one_time,4.8,https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=100&q=60,hidden_gem
+Sheikh Zayed Mosque,Abu Dhabi,8.7,Water-efficient iconic mosque,0,Place,one_time,4.7,https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?auto=format&fit=crop&w=100&q=60,
+Louvre Abu Dhabi,Abu Dhabi,8.3,Energy-efficient museum complex,60,Place,one_time,4.6,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,
+Mangrove National Park,Abu Dhabi,9.5,Protected mangrove ecosystem,0,Place,one_time,4.9,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
+Qasr Al Hosn,Abu Dhabi,8.6,Historic fort with gardens,15,Place,one_time,4.5,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+Saadiyat Cultural District,Abu Dhabi,8.8,Low-carbon cultural district,0,Place,one_time,4.4,https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=100&q=60,
+Sharjah Art Museum,Sharjah,8.3,Sustainable art museum,10,Place,one_time,4.2,https://images.unsplash.com/photo-1564507592333-cdd2aa0775d1?auto=format&fit=crop&w=100&q=60,
+Al Qasba Canal,Sharjah,8.5,Water eco-management public space,0,Place,one_time,4.3,https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=100&q=60,
+Sharjah Desert Park,Sharjah,8.9,Wildlife sanctuary with EV shuttles,20,Place,one_time,4.6,https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?auto=format&fit=crop&w=100&q=60,
+Mleiha Archeology Zone,Sharjah,9.2,Ancient eco-trails and caves,25,Place,one_time,4.7,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,hidden_gem
+Dubai Turtle Centre,Dubai,9.6,Turtle rescue & conservation zone,0,Place,one_time,4.9,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
+Dubai Butterfly Garden,Dubai,8.4,Solar-powered butterfly dome,20,Place,one_time,4.5,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+Al Noor Island,Sharjah,9.1,Mangrove eco-walkway and nature reserve,25,Place,one_time,4.8,https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=100&q=60,
+Sir Bani Yas Island,Abu Dhabi,9.3,Wildlife conservation island,80,Place,one_time,4.7,https://images.unsplash.com/photo-1564507592333-cdd2aa0775d1?auto=format&fit=crop&w=100&q=60,
+Dubai Solar Park,Dubai,9.7,Massive solar farm with tours,5,Place,one_time,4.9,https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=100&q=60,
+Sharjah Rain Room,Sharjah,8.5,Water-efficient art installation,15,Place,one_time,4.4,https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?auto=format&fit=crop&w=100&q=60,hidden_gem
