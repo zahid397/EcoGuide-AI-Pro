@@ -1,0 +1,7 @@
+name,location,eco_score,description,price,data_type,cost_type,avg_rating,image_url,tag
+Dubai Metro Green Line,Dubai,9.5,Electric metro with zero-emission transport,3,Transport,one_time,4.8,https://images.unsplash.com/photo-1556745753-b2904692b3cd?auto=format&fit=crop&w=100&q=60,
+Dubai EV Taxi,Dubai,9.0,Electric taxi service across Dubai,15,Transport,one_time,4.6,https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?auto=format&fit=crop&w=100&q=60,
+Tier E-Scooter,Dubai,8.2,Shared e-scooter rides with low carbon impact,2,Transport,one_time,4.2,https://images.unsplash.com/photo-1549921296-3f14b55d57d8?auto=format&fit=crop&w=100&q=60,
+Abu Dhabi E-Bus,Abu Dhabi,9.1,Electric bus system connecting major areas,5,Transport,one_time,4.7,https://images.unsplash.com/photo-1518943701175-19c0b79a2c57?auto=format&fit=crop&w=100&q=60,
+Sharjah Eco Bus,Sharjah,8.6,Hybrid bus service with low emissions,4,Transport,one_time,4.3,https://images.unsplash.com/photo-1485291571150-772bcfc10da5?auto=format&fit=crop&w=100&q=60,
+EV Car Rental UAE,Dubai,8.9,Tesla and hybrid car rental with charging access,120,Transport,one_time,4.5,https://images.unsplash.com/photo-1549924231-f129b911e442?auto=format&fit=crop&w=100&q=60,
