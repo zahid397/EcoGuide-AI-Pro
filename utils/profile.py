@@ -8,12 +8,20 @@ PROFILE_DIR = "data/profiles"
 
 def save_profile(name: str, interests: List[str], budget: int) -> None:
     """Saves user profile to a JSON file."""
-    profile_path = os.path.join(PROFILE_DIR, f"profile_{name}.json")
-    profile_data = {"interests": interests, "budget": budget}
+    
     try:
+        # --- ✳️ FIX: Ensure the directory exists before writing ---
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        # ---
+        
+        profile_path = os.path.join(PROFILE_DIR, f"profile_{name}.json")
+        profile_data = {"interests": interests, "budget": budget}
+        
         with open(profile_path, 'w') as f:
             json.dump(profile_data, f)
+            
         st.sidebar.success("Profile Saved!")
+        
     except Exception as e:
         st.sidebar.error(f"Failed to save profile: {e}")
         logger.exception(f"Failed to save profile for {name}: {e}")
@@ -29,4 +37,3 @@ def load_profile(name: str) -> Dict[str, Any]:
             logger.exception(f"Failed to load profile for {name}: {e}")
             return {}
     return {}
-  
