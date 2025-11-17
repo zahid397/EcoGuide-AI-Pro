@@ -1,78 +1,150 @@
-# ============================
-# RAG ENGINE (FINAL FIXED VERSION)
-# ============================
+import os
 import shutil
+import pandas as pd
+from qdrant_client import QdrantClient, models
+from sentence_transformers import SentenceTransformer
+from uuid import uuid4
+from utils.logger import logger
 
+COLLECTION = "eco_travel_v3"
+DATA_DIR = "data"
+VECTOR_SIZE = 384
+
+
+# ------------------------
+# EMBEDDER (384-D)
+# ------------------------
+class SafeEmbedder:
+    def __init__(self):
+        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        print("Embedder loaded (384-d vector).")
+
+    def encode(self, text: str):
+        return self.model.encode(text).tolist()
+
+
+# ------------------------
+# RAG ENGINE
+# ------------------------
 class RAGEngine:
     def __init__(self):
-        self.embedder = SafeEmbedder()
-        
-        # CSV paths
-        self.csv_hotels = os.path.join(DATA_DIR, "hotels.csv")
-        self.csv_activities = os.path.join(DATA_DIR, "activities.csv")
-        self.csv_places = os.path.join(DATA_DIR, "places.csv")
 
-        # ✳️ STEP 1 — DELETE LOCAL QDRANT FOLDER (real fix)
+        # --- HARD RESET: delete old DB ---
         if os.path.exists("qdrant_local"):
-            print("🧹 Cleaning old Qdrant DB…")
-            shutil.rmtree("qdrant_local")   # ← full delete
+            print("🧹 Cleaning old Qdrant DB...")
+            shutil.rmtree("qdrant_local")
 
-        # STEP 2 — Recreate Qdrant client (empty fresh DB)
+        # fresh local DB
         self.client = QdrantClient(path="qdrant_local")
+        self.embedder = SafeEmbedder()
 
-        # STEP 3 — Recreate collection fresh
-        print("🔄 Recreating fresh collection…")
+        # recreate empty collection
         self._init_collection()
 
-        # STEP 4 — Reindex all CSV files
-        print("📦 Re-indexing all CSV files…")
+        # index all supported CSV datasets
         self._index_all()
 
-        print("✅ Database reset complete. Fresh index is ready!")
+        print("✅ RAG Engine ready.")
 
 
-    # Create collection
+    # recreate collection fresh
     def _init_collection(self):
         self.client.recreate_collection(
             collection_name=COLLECTION,
             vectors_config=models.VectorParams(
-                size=VECTOR_DIMENSION,
+                size=VECTOR_SIZE,
                 distance=models.Distance.COSINE,
             ),
         )
+        print("Created fresh collection.")
 
-    # Index CSV
-    def _index_file(self, file_path, data_type):
-        if not os.path.exists(file_path):
-            logger.warning(f"Missing file: {file_path}")
+
+    # index a single CSV
+    def _index_file(self, filename, data_type):
+
+        path = os.path.join(DATA_DIR, filename)
+
+        if not os.path.exists(path):
+            print(f"⚠️ Skipped missing CSV: {path}")
             return
 
-        df = pd.read_csv(file_path)
+        df = pd.read_csv(path)
         points = []
 
         for _, row in df.iterrows():
+
             payload = row.to_dict()
+
+            # ensure mandatory fields exist
             payload["data_type"] = data_type
             payload["eco_score"] = float(payload.get("eco_score", 0))
+            payload["image_url"] = payload.get("image_url", "https://placehold.co/100")
 
-            # text to embed
+            # cost field normalization
+            payload["cost"] = (
+                payload.get("price_per_night")
+                or payload.get("price")
+                or payload.get("entry_fee")
+                or 0
+            )
+            payload["cost_type"] = payload.get("cost_type", "one_time")
+
+            # text for embedding
             text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')}"
-            vec = self.embedder.encode(text)
+
+            embedding = self.embedder.encode(text)
 
             points.append(
                 models.PointStruct(
                     id=str(uuid4()),
-                    vector=vec,
+                    vector=embedding,
                     payload=payload
                 )
             )
 
         if points:
-            self.client.upsert(collection_name=COLLECTION, points=points)
-            print(f"Indexed {len(points)} items from {file_path}")
+            self.client.upsert(COLLECTION, points)
+            print(f"Indexed {len(points)} items → {filename}")
 
-    # Index all
+
+    # index all CSVs from your data folder
     def _index_all(self):
-        self._index_file(self.csv_hotels, "Hotel")
-        self._index_file(self.csv_activities, "Activity")
-        self._index_file(self.csv_places, "Place")
+        print("📦 Indexing all CSV files...")
+
+        files = [
+            ("hotels.csv", "Hotel"),
+            ("activities.csv", "Activity"),
+            ("places.csv", "Place"),
+            ("food.csv", "Food"),
+            ("nightlife.csv", "Nightlife"),
+            ("shopping.csv", "Shopping"),
+            ("transport.csv", "Transport"),
+        ]
+
+        for file, dtype in files:
+            self._index_file(file, dtype)
+
+        print("✅ All CSV indexing done!")
+
+
+    # semantic search
+    def search(self, query: str, top_k=10, min_eco_score=7.0):
+
+        qvec = self.embedder.encode(query)
+
+        results = self.client.search(
+            collection_name=COLLECTION,
+            query_vector=qvec,
+            query_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="eco_score",
+                        range=models.Range(gte=min_eco_score)
+                    )
+                ]
+            ),
+            limit=top_k,
+            with_payload=True,
+        )
+
+        return [r.payload for r in results]
