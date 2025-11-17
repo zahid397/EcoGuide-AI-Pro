@@ -1,4 +1,3 @@
-
 import os
 import pandas as pd
 from qdrant_client import QdrantClient, models
@@ -8,64 +7,41 @@ from utils.logger import logger
 
 COLLECTION = "eco_travel_v3"
 
-# ============================================================
-# BASE FOLDER FOR CSV DATA
-# ============================================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "..", "data")
 
-
-# ============================================================
-# SAFE TF-IDF EMBEDDER (ALWAYS RETURNS VECTOR SIZE = 384)
-# ============================================================
+# ---------------------- TF-IDF Embedder ----------------------
 class SafeEmbedder:
     def __init__(self):
         self.vectorizer = TfidfVectorizer(max_features=384)
-        self.fitted = False
 
-    def fit_once(self, texts):
-        """Fit only one time (first run)."""
-        if not self.fitted:
-            try:
-                self.vectorizer.fit(texts)
-                self.fitted = True
-            except:
-                pass
-
-    def encode(self, text: str):
-        """Always return vector = 384 dims."""
-        if not self.fitted:
-            self.fit_once([text])
-
+    def fit(self, texts):
         try:
-            vec = self.vectorizer.transform([text]).toarray()
+            self.vectorizer.fit(texts)
         except:
-            self.fit_once([text])
-            vec = self.vectorizer.transform([text]).toarray()
+            pass
 
-        emb = vec[0].tolist()
+    def encode(self, text):
+        try:
+            v = self.vectorizer.transform([text]).toarray()
+        except:
+            self.fit([text])
+            v = self.vectorizer.transform([text]).toarray()
+        return v[0].tolist()
 
-        # Padding if TF-IDF returned smaller vector
-        if len(emb) < 384:
-            emb = emb + [0.0] * (384 - len(emb))
 
-        return emb[:384]
-
-
-# ============================================================
-# RAG ENGINE
-# ============================================================
+# ---------------------- RAG Engine ----------------------
 class RAGEngine:
     def __init__(self):
-        """
-        Use local Qdrant with unique folder to avoid file-locking in Streamlit Cloud.
-        """
-        storage_path = os.path.join(BASE_DIR, "..", "qdrant_local_store")
+        # LOCAL QDRANT (Streamlit safe!)
+        self.client = QdrantClient(path="qdrant_local")
 
-        self.client = QdrantClient(path=storage_path)
         self.embedder = SafeEmbedder()
 
-        # Check collections
+        self._ensure_collection()
+        self._index_all()
+
+
+    # Create collection if missing
+    def _ensure_collection(self):
         try:
             collections = self.client.get_collections().collections
             names = [c.name for c in collections]
@@ -73,101 +49,79 @@ class RAGEngine:
             names = []
 
         if COLLECTION not in names:
-            logger.info("⚡ Creating new Qdrant collection...")
-            self._init_collection()
-            self._index_all()
-        else:
-            logger.info("✔ Qdrant collection already exists. Skipping indexing.")
-
-    # --------------------------------------------------------------
-    def _init_collection(self):
-        """Create fresh vector DB collection."""
-        self.client.recreate_collection(
-            collection_name=COLLECTION,
-            vectors_config=models.VectorParams(
-                size=384,
-                distance=models.Distance.COSINE
+            self.client.recreate_collection(
+                collection_name=COLLECTION,
+                vectors_config=models.VectorParams(
+                    size=384,
+                    distance=models.Distance.COSINE
+                )
             )
-        )
-        logger.info("✔ Collection Initialized.")
 
-    # --------------------------------------------------------------
-    def _index_file(self, csv_path: str, data_type: str):
-        if not os.path.exists(csv_path):
-            logger.error(f"❌ CSV missing: {csv_path}")
+
+    # ------------------ Indexing ------------------
+    def _index_file(self, file_path, data_type):
+        if not os.path.exists(file_path):
+            logger.error(f"❌ Missing CSV: {file_path}")
             return
 
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(file_path)
         points = []
 
         for _, row in df.iterrows():
             payload = row.to_dict()
             payload["data_type"] = data_type
-
-            # Ensure eco_score exists
             payload["eco_score"] = float(payload.get("eco_score", 0))
 
-            # Build text for embedding
-            text = (
-                f"{payload.get('name', '')} "
-                f"{payload.get('location', '')} "
-                f"{payload.get('description', '')} "
-                f"{data_type}"
-            )
+            # TEXT FOR EMBEDDING
+            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')} {data_type}"
 
-            vector = self.embedder.encode(text)
+            embed = self.embedder.encode(text)
 
             points.append(
                 models.PointStruct(
                     id=str(uuid4()),
-                    vector=vector,
+                    vector=embed,
                     payload=payload
                 )
             )
 
         if points:
-            self.client.upsert(collection_name=COLLECTION, points=points)
-            logger.info(f"✔ Indexed {len(points)} items from {csv_path}")
+            self.client.upsert(COLLECTION, points)
+            print(f"Indexed {len(points)} items from {file_path}")
 
-    # --------------------------------------------------------------
+
     def _index_all(self):
-        logger.info("🚀 Indexing all data sources...")
+        print("Indexing data...")
+        self._index_file("data/hotels.csv", "Hotel")
+        self._index_file("data/activities.csv", "Activity")
+        self._index_file("data/places.csv", "Place")
 
-        self._index_file(os.path.join(DATA_DIR, "hotels.csv"), "Hotel")
-        self._index_file(os.path.join(DATA_DIR, "activities.csv"), "Activity")
-        self._index_file(os.path.join(DATA_DIR, "places.csv"), "Place")
 
-        logger.info("✨ All CSV files indexed successfully!")
-
-    # --------------------------------------------------------------
-    def search(self, query: str, top_k: int = 15, min_eco_score: float = 7.0):
-
-        vector = self.embedder.encode(query)
-
-        eco_filter = models.Filter(
-            must=[
-                models.FieldCondition(
-                    key="eco_score",
-                    range=models.Range(gte=min_eco_score)
-                )
-            ]
-        )
+    # ------------------ SEARCH ------------------
+    def search(self, query, top_k=20, min_eco_score=7.0):
 
         try:
+            vector = self.embedder.encode(query)
+
+            eco_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="eco_score",
+                        range=models.Range(gte=min_eco_score)
+                    )
+                ]
+            )
+
             results = self.client.search(
                 collection_name=COLLECTION,
                 query_vector=vector,
                 query_filter=eco_filter,
                 limit=top_k,
-                with_payload=True,
-            )
+                with_payload=True
+            ) or []
 
-            if not results:
-                return []
-
-            formatted = [hit.payload for hit in results]
-            return formatted
+            return [hit.payload for hit in results]
 
         except Exception as e:
-            logger.exception(f"❌ RAG Search failed: {e}")
+            logger.error(f"Search failed: {e}")
             return []
