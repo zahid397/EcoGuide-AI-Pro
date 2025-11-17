@@ -75,14 +75,35 @@ class RAGEngine:
             ),
         )
 
-    # ----------------------------------------------------------------
-    def _index_file(self, file_path: str, data_type: str):
-        if not os.path.exists(file_path):
-            logger.warning(f"Missing CSV → {file_path}")
-            return
+    # ---------------------------------------------------------------
+        def _index_all(self) -> None:
+    print("Indexing data sources...")
 
-        df = pd.read_csv(file_path)
-        points = []
+    base = "/mount/src/ecoguide-ai-pro/data"
+
+    files = [
+        ("hotels.csv", "Hotel"),
+        ("activities.csv", "Activity"),
+        ("places.csv", "Place"),
+        ("food.csv", "Food"),
+        ("nightlife.csv", "Nightlife"),
+        ("shopping.csv", "Shopping"),
+        ("transport.csv", "Transport"),
+    ]
+
+    loaded_count = 0
+
+    for file, dtype in files:
+        path = os.path.join(base, file)
+
+        if os.path.exists(path):
+            print(f"Indexing {path}...")
+            self._index_file(path, dtype)
+            loaded_count += 1
+        else:
+            print(f"❌ MISSING FILE → {path}")
+
+    print(f"✔ Total datasets indexed: {loaded_count}")
 
         for _, row in df.iterrows():
             payload = row.to_dict()
