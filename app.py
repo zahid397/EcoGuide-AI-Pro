@@ -1,5 +1,13 @@
 import streamlit as st
 import os
+import sys # ✳️ Import sys
+
+# --- ✳️ FIX: Add project root to Python path ---
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+# --- End Fix ---
+
 from utils.env_validator import validate_env
 from utils.caching import get_agent, get_rag
 from utils.state import init_session_state
