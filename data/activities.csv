@@ -1,0 +1,21 @@
+name,location,eco_score,description,price,data_type,cost_type,avg_rating,image_url,tag
+Dubai Eco Kayaking,Dubai,8.8,Guided mangrove eco-kayaking tour with birdwatching,70,Activity,one_time,4.6,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,
+Palm Jumeirah Cycling,Dubai,8.2,Beachside eco-cycling with low-impact routes,25,Activity,one_time,4.2,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
+Dubai Heritage Walk,Dubai,9.1,Old Dubai eco-walk with cultural insights,10,Activity,one_time,4.7,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+EV Desert Safari,Dubai,9.0,Electric-vehicle desert safari preserving dunes,120,Activity,one_time,4.8,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,
+Green Market Tour,Dubai,8.5,Organic farmers market visit with zero-waste workshop,0,Activity,one_time,4.3,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,hidden_gem
+Abu Dhabi Mangrove Kayak,Abu Dhabi,9.3,Kayaking in mangrove forest with eco-guide,80,Activity,one_time,4.9,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+Emirates Park Zoo Eco-Visit,Abu Dhabi,8.1,Conservation program with EV shuttle transport,45,Activity,one_time,4.4,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,
+Saadiyat Beach Yoga,Abu Dhabi,8.7,Sustainable beach yoga with turtle-safe policies,30,Activity,one_time,4.5,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
+Sharjah Nature Hike,Sharjah,8.4,Mountain hiking trail with biodiversity education,15,Activity,one_time,4.2,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+Sharjah Cultural Eco Tour,Sharjah,8.9,Heritage museums with recycled art workshops,20,Activity,one_time,4.6,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,
+Dubai Solar Farm Tour,Dubai,9.4,Guided tour of UAE’s largest solar farm,40,Activity,one_time,4.8,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
+Dubai Green Art Tour,Dubai,8.3,Upcycled art galleries and eco-design workshops,10,Activity,one_time,4.1,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,hidden_gem
+Eco Island Boat Tour,Abu Dhabi,8.6,Low-emission wildlife boat tour,60,Activity,one_time,4.4,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,
+Al Noor Island Eco Walk,Sharjah,9.2,Nature reserve with butterfly garden,25,Activity,one_time,4.7,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
+Dubai Zero-Waste Workshop,Dubai,8.8,Hands-on upcycling and sustainability training,5,Activity,one_time,4.3,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+Sharjah Botanical Garden Tour,Sharjah,9.0,Guided eco-walk through conservation plant species,20,Activity,one_time,4.6,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,
+Abu Dhabi Falcon Program,Abu Dhabi,8.5,Falcon eco-program with EV transport,70,Activity,one_time,4.5,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
+Dubai Water Conservation Park,Dubai,8.7,Interactive recycled-water exhibition,30,Activity,one_time,4.4,https://images.unsplash.com/photo-1517457373958-b7bdd4587206?auto=format&fit=crop&w=100&q=60,
+Sharjah Wetland Bird Watching,Sharjah,9.1,Protected wetland with eco-birdwatching trail,10,Activity,one_time,4.8,https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=100&q=60,hidden_gem
+Arabian Pearl Diving Eco,Dubai,8.9,Traditional pearl diving with no-plastic policy,50,Activity,one_time,4.7,https://images.unsplash.com/photo-1558618666-fcd25c85cd64?auto=format&fit=crop&w=100&q=60,
