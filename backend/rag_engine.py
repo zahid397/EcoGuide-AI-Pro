@@ -1,73 +1,63 @@
 import os
 import pandas as pd
-from uuid import uuid4
 from qdrant_client import QdrantClient, models
 from sklearn.feature_extraction.text import TfidfVectorizer
+from uuid import uuid4
 from utils.logger import logger
 
 COLLECTION = "eco_travel_v3"
 DATA_DIR = "data"
-VECTOR_DIM = 384
+VECTOR_DIM = 384   # fixed vector dimension
 
 
-# -------------------------------
-# Simple Embedding (Works 100%)
-# -------------------------------
-class SimpleEmbedder:
+# --------------------------------------------------------
+# Stable TF-IDF Embedder (always 384-dim)
+# --------------------------------------------------------
+class TFIDFEmbedder:
     def __init__(self):
         self.vectorizer = TfidfVectorizer(max_features=VECTOR_DIM)
-        self.fitted = False
+        self.is_fitted = False
 
     def fit(self, texts):
-        try:
+        if not self.is_fitted and len(texts) > 0:
             self.vectorizer.fit(texts)
-            self.fitted = True
-        except Exception as e:
-            logger.error(f"Vectorizer fit failed: {e}")
+            self.is_fitted = True
 
     def encode(self, text):
-        if not self.fitted:
-            # fallback
-            self.fit([text])
-
         try:
-            v = self.vectorizer.transform([text]).toarray()[0]
+            vec = self.vectorizer.transform([text]).toarray()[0]
         except:
-            # rebuild if needed
-            self.fit([text])
-            v = self.vectorizer.transform([text]).toarray()[0]
-
-        return v.tolist()
+            vec = [0.0] * VECTOR_DIM
+        return vec.tolist()
 
 
-# -------------------------------
-# RAG ENGINE
-# -------------------------------
+# --------------------------------------------------------
+#                  RAG ENGINE (NO TORCH)
+# --------------------------------------------------------
 class RAGEngine:
     def __init__(self):
-        # Local Qdrant (100% stable)
+        # local Qdrant
         self.client = QdrantClient(path="qdrant_local")
-        self.embedder = SimpleEmbedder()
+        self.embedder = TFIDFEmbedder()
 
-        # prepare dataset
-        self.paths = {
-            "Hotel": os.path.join(DATA_DIR, "hotels.csv"),
-            "Activity": os.path.join(DATA_DIR, "activities.csv"),
-            "Place": os.path.join(DATA_DIR, "places.csv"),
-        }
+        # data files
+        self.hotels = f"{DATA_DIR}/hotels.csv"
+        self.activities = f"{DATA_DIR}/activities.csv"
+        self.places = f"{DATA_DIR}/places.csv"
 
-        # rebuild collection every run (safe)
-        self._rebuild_collection()
+        # -------- Fit TF-IDF on all CSV text --------
+        all_texts = []
+        for path in [self.hotels, self.activities, self.places]:
+            if os.path.exists(path):
+                df = pd.read_csv(path)
+                for _, row in df.iterrows():
+                    all_texts.append(
+                        f"{row.get('name','')} {row.get('location','')} {row.get('description','')}"
+                    )
 
-    # ---------------------------
-    def _rebuild_collection(self):
-        print("🔥 Rebuilding vector DB...")
-        self._init_collection()
-        self._index_all()
-        print("✅ Rebuild complete")
+        self.embedder.fit(all_texts)
 
-    # ---------------------------
-    def _init_collection(self):
+        # -------- Clean recreate collection --------
         self.client.recreate_collection(
             collection_name=COLLECTION,
             vectors_config=models.VectorParams(
@@ -76,59 +66,55 @@ class RAGEngine:
             )
         )
 
-    # ---------------------------
-    def _index_file(self, path, dtype):
+        # -------- Index data --------
+        self._index_all()
+
+
+    # -----------------------------------------------------
+    def _index_file(self, path, data_type):
         if not os.path.exists(path):
-            logger.warning(f"File missing: {path}")
+            logger.warning(f"CSV missing: {path}")
             return
 
         df = pd.read_csv(path)
-
-        # Convert eco_score to float cleanly
-        def safe_float(x):
-            try:
-                return float(x)
-            except:
-                return 0.0
-
-        df["eco_score"] = df["eco_score"].apply(safe_float)
-
-        combined_texts = []
         points = []
 
         for _, row in df.iterrows():
             payload = row.to_dict()
-            payload["data_type"] = dtype
+            payload["data_type"] = data_type
 
-            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')}"
-            combined_texts.append(text)
+            # text for embedding
+            text = (
+                f"{payload.get('name','')} "
+                f"{payload.get('location','')} "
+                f"{payload.get('description','')}"
+            )
 
-        # Fit vectorizer once per file
-        self.embedder.fit(combined_texts)
-
-        for idx, row in df.iterrows():
-            payload = row.to_dict()
-            payload["data_type"] = dtype
-
-            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')}"
             vec = self.embedder.encode(text)
 
-            points.append(models.PointStruct(
-                id=str(uuid4()),
-                vector=vec,
-                payload=payload
-            ))
+            points.append(
+                models.PointStruct(
+                    id=str(uuid4()),
+                    vector=vec,
+                    payload=payload
+                )
+            )
 
         if points:
-            self.client.upsert(COLLECTION, points)
-            print(f"Indexed {len(points)} items → {dtype}")
+            self.client.upsert(collection_name=COLLECTION, points=points)
+            print(f"Indexed {len(points)} rows from {path}")
 
-    # ---------------------------
+
+    # -----------------------------------------------------
     def _index_all(self):
-        for dtype, path in self.paths.items():
-            self._index_file(path, dtype)
+        print("Indexing CSV files...")
+        self._index_file(self.hotels, "Hotel")
+        self._index_file(self.activities, "Activity")
+        self._index_file(self.places, "Place")
+        print("✔ Done indexing")
 
-    # ---------------------------
+
+    # -----------------------------------------------------
     def search(self, query, top_k=10, min_eco_score=7.0):
         qvec = self.embedder.encode(query)
 
@@ -136,27 +122,12 @@ class RAGEngine:
             collection_name=COLLECTION,
             query_vector=qvec,
             limit=top_k,
-            with_payload=True,
             query_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="eco_score",
-                        range=models.Range(gte=float(min_eco_score))
-                    )
-                ]
+                must=[models.FieldCondition(
+                    key="eco_score",
+                    range=models.Range(gte=min_eco_score)
+                )]
             )
         )
 
-        output = []
-        for r in results:
-            p = r.payload
-
-            # Final safety: ensure eco_score is float
-            try:
-                p["eco_score"] = float(p.get("eco_score", 0))
-            except:
-                p["eco_score"] = 0.0
-
-            output.append(p)
-
-        return output
+        return [hit.payload for hit in results]
