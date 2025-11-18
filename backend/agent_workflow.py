@@ -30,18 +30,20 @@ def fallback_itinerary():
 
 
 # ============================================
-#  AGENT WORKFLOW (WITH FORCED JSON + FALLBACK)
+#  AGENT WORKFLOW
 # ============================================
 class AgentWorkflow:
     def __init__(self):
-        # Force Gemini to return PURE JSON ONLY
         self.model = genai.GenerativeModel(
             "gemini-1.5-flash",
             generation_config={
-                "response_mime_type": "application/json"  # 🔥 Forces JSON output
+                "response_mime_type": "application/json"   # ⭐ ALWAYS JSON
             }
         )
 
+    # -----------------------------------------
+    # MAIN ITINERARY GENERATOR
+    # -----------------------------------------
     def run(
         self,
         query,
@@ -55,7 +57,6 @@ class AgentWorkflow:
         priorities
     ):
         try:
-            # Prepare RAG context for the LLM
             context_items = []
             for item in rag_data:
                 context_items.append({
@@ -66,7 +67,6 @@ class AgentWorkflow:
                     "description": item.get("description", "")
                 })
 
-            # Build full prompt
             prompt = {
                 "query": query,
                 "budget": budget,
@@ -78,35 +78,65 @@ class AgentWorkflow:
                 "context_items": context_items
             }
 
-            # Request JSON-only answer
             response = self.model.generate_content(prompt)
 
-            # -----------------------
-            # 1st Attempt: Function Call
-            # -----------------------
+            # 1st: JSON from function call
             try:
                 data = response.candidates[0].content.parts[0].function_call.args
                 return dict(data)
             except:
                 pass
 
-            # -----------------------
-            # 2nd Attempt: Raw JSON Extraction
-            # -----------------------
+            # 2nd: JSON extract from text (rare)
             try:
-                raw_text = response.text
-                parsed = extract_json(raw_text)
-                if parsed:
-                    return parsed
+                raw = response.text
+                json_data = extract_json(raw)
+                if json_data:
+                    return json_data
             except:
                 pass
 
-            # -----------------------
-            # 3rd Attempt: FALLBACK
-            # -----------------------
-            logger.error("Gemini failed to produce usable JSON. Using fallback.")
+            # 3rd: fallback
+            logger.error("Gemini returned no valid JSON. Using fallback.")
             return fallback_itinerary()
 
         except Exception as e:
             logger.exception(f"Agent failed: {e}")
             return fallback_itinerary()
+
+    # -----------------------------------------
+    # NEW: UPGRADE SUGGESTIONS (Fix for your error)
+    # -----------------------------------------
+    def get_upgrade_suggestions(self, itinerary):
+        """
+        Generates upgrade ideas (premium hotels, premium activities).
+        Always returns safe data.
+        """
+        try:
+            prompt = {
+                "task": "Generate upgrade suggestions",
+                "itinerary": itinerary
+            }
+
+            response = self.model.generate_content(prompt)
+
+            # Try direct JSON
+            try:
+                data = response.candidates[0].content.parts[0].function_call.args
+                return list(data.get("upgrades", []))
+            except:
+                pass
+
+            # Try JSON from text
+            try:
+                raw = response.text
+                parsed = extract_json(raw)
+                if parsed and "upgrades" in parsed:
+                    return parsed["upgrades"]
+            except:
+                pass
+
+            return ["Premium hotel upgrade unavailable", "Luxury activity upgrade unavailable"]
+
+        except:
+            return ["Upgrade suggestion failed (fallback)"]
