@@ -1,6 +1,6 @@
 import streamlit as st
 
-def render_analysis(itinerary: dict):
+def render(itinerary: dict):
     """Renders the Analysis tab safely."""
 
     st.subheader("🔬 Trip Analysis")
