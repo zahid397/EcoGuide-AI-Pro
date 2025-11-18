@@ -1,34 +1,40 @@
 import json
-from typing import Dict, Any, List
-from utils.logger import logger
-from backend.utils_json import extract_json
+import traceback
+from typing import Any, Dict, List
+
+from backend.utils import extract_json
 
 
 class AgentWorkflow:
     """
-    AI Agent: Takes RAG results + user info → builds final itinerary.
-    Works even if LLM returns half-json, broken text, or missing fields.
+    AI workflow engine for generating trip itinerary.
+    Works with any RAG results and produces structured JSON.
     """
 
     def __init__(self):
-        pass
+        # If you use Gemini:
+        from openai import OpenAI
+        self.client = OpenAI()  # Uses OPENAI_API_KEY or GOOGLE_API_KEY through env
 
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def run(
         self,
         query: str,
         rag_data: List[Dict[str, Any]],
-        budget: float,
+        budget: int,
         interests: List[str],
         days: int,
         location: str,
         travelers: int,
         user_profile: Dict[str, Any],
-        priorities: Dict[str, Any]
+        priorities: Dict[str, int],
     ) -> Dict[str, Any]:
+        """
+        Main function to generate itinerary with AI help.
+        Returns structured dict (JSON).
+        """
 
         try:
-            # 💡 Build prompt for LLM
             prompt = self._build_prompt(
                 query=query,
                 rag_data=rag_data,
@@ -38,117 +44,100 @@ class AgentWorkflow:
                 location=location,
                 travelers=travelers,
                 user_profile=user_profile,
-                priorities=priorities
+                priorities=priorities,
             )
 
-            # --------------------------------
-            # 💬 CALL LLM (Gemini or GPT)
-            # --------------------------------
-            # তুমি এখানে নিজের LLM function call করবে
-            # For example:
-            # llm_response = call_llm(prompt)
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4,
+            )
 
-            llm_response = self._mock_llm_response(rag_data, days)  # 🔥 DEMO STABLE
+            raw_output = response.choices[0].message["content"]
 
-            # --------------------------------
-            # 🧠 Extract JSON from response
-            # --------------------------------
-            itinerary = extract_json(llm_response)
+            parsed = extract_json(raw_output)
+            if not parsed:
+                return {
+                    "error": "AI returned invalid JSON.",
+                    "raw_response": raw_output,
+                }
 
-            if not itinerary:
-                logger.warning("⚠️ LLM JSON extraction failed. Using fallback plan")
-                itinerary = self._fallback_itinerary(rag_data, days)
-
-            return itinerary
+            return parsed
 
         except Exception as e:
-            logger.exception(f"Agent failed: {e}")
-            return self._fallback_itinerary(rag_data, days)
+            return {
+                "error": str(e),
+                "trace": traceback.format_exc(),
+            }
 
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def _build_prompt(
-        self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities
+        self,
+        query: str,
+        rag_data: List[Dict[str, Any]],
+        budget: int,
+        interests: List[str],
+        days: int,
+        location: str,
+        travelers: int,
+        user_profile: Dict[str, Any],
+        priorities: Dict[str, int],
     ) -> str:
+        """
+        Create structured AI prompt with instructions + JSON format.
+        """
+
+        rag_text = json.dumps(rag_data, indent=2)
 
         return f"""
-You are EcoGuide AI — an expert sustainability travel planner.
+You are EcoGuide AI — an expert eco-friendly travel planner.
 
-USER PROFILE:
-Name: {user_profile.get("name","Unknown")}
-Budget: {budget}
-Interests: {interests}
-Priorities: {priorities}
+User Query:
+{query}
 
-TRIP INFO:
-Days: {days}
-Travelers: {travelers}
-Location: {location}
+User Profile:
+{json.dumps(user_profile, indent=2)}
 
-RAG MATCHES (Highly relevant eco-friendly hotels/activities):
-{json.dumps(rag_data, indent=2)}
+Trip Preferences:
+- Location: {location}
+- Travelers: {travelers}
+- Days: {days}
+- Interests: {', '.join(interests)}
+- Budget: {budget}
+- Priorities: {priorities}
 
-TASK:
-Create an eco-friendly trip plan in **VALID JSON ONLY**:
+Eco-Friendly Options from Database (RAG results):
+{rag_text}
 
-Format:
-{{
-  "trip_overview": "...",
+=========================
+IMPORTANT RESPONSE RULES
+=========================
+1. Always respond ONLY with **valid JSON**.
+2. Do NOT include explanations outside the JSON.
+3. The JSON MUST contain:
+
+{
+  "summary": "short overview of the trip",
   "daily_plan": [
-      {{"day": 1, "morning": "", "afternoon": "", "evening": ""}},
-      ...
+     {
+       "day": 1,
+       "activities": [
+          {
+            "name": "",
+            "eco_score": 0,
+            "cost": 0,
+            "location": "",
+            "description": ""
+          }
+       ]
+     }
   ],
-  "recommended_hotels": [],
-  "top_activities": []
-}}
+  "estimated_total_cost": 0,
+  "packing_list": [],
+  "tips": []
+}
+
+4. Ensure activities come **only from RAG data**.
+5. Ensure total cost does not exceed budget.
+6. Make the trip realistic, eco-friendly and safe.
 """
-
-    # ----------------------------------------------------------------------
-    def _mock_llm_response(self, rag_data, days):
-        """
-        🔥 Reliable fallback for demos (LLM not required).
-        Always returns clean JSON based on RAG results.
-        """
-
-        hotels = [x for x in rag_data if x.get("data_type") == "Hotel"]
-        activities = [x for x in rag_data if x.get("data_type") == "Activity"]
-
-        plan = {
-            "trip_overview": f"Eco-friendly {days}-day trip based on top sustainable options.",
-            "daily_plan": [],
-            "recommended_hotels": hotels[:3],
-            "top_activities": activities[:5]
-        }
-
-        for d in range(1, days + 1):
-            plan["daily_plan"].append({
-                "day": d,
-                "morning": activities[d % len(activities)].get("name", "Nature Walk") if activities else "Local eco-walk",
-                "afternoon": activities[(d+1) % len(activities)].get("name", "Cultural Tour") if activities else "Cultural eco spot",
-                "evening": hotels[d % len(hotels)].get("name", "Eco Stay") if hotels else "Relax at eco hotel"
-            })
-
-        return json.dumps(plan)
-
-    # ----------------------------------------------------------------------
-    def _fallback_itinerary(self, rag_data, days):
-        """🔥 If LLM or JSON fails → use guaranteed fallback."""
-        hotels = [x for x in rag_data if x.get("data_type") == "Hotel"]
-        activities = [x for x in rag_data if x.get("data_type") == "Activity"]
-
-        plan = {
-            "trip_overview": "Backup eco-friendly plan (LLM failed).",
-            "daily_plan": [],
-            "recommended_hotels": hotels[:3] if hotels else [],
-            "top_activities": activities[:5] if activities else []
-        }
-
-        # Generate simple plan
-        for d in range(1, days + 1):
-            plan["daily_plan"].append({
-                "day": d,
-                "morning": "Visit nearby eco spot",
-                "afternoon": "Low-impact cultural walk",
-                "evening": "Relax at eco hotel"
-            })
-
-        return plan
