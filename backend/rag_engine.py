@@ -1,70 +1,70 @@
 import os
 import pandas as pd
-from utils.logger import logger
 
 DATA_DIR = "data"
+COL_HOTEL = os.path.join(DATA_DIR, "hotels.csv")
+COL_ACT = os.path.join(DATA_DIR, "activities.csv")
+COL_PLACE = os.path.join(DATA_DIR, "places.csv")
+
 
 class HybridRAG:
+    """Fast CSV-based hybrid RAG (no Qdrant needed)."""
+
     def __init__(self):
-        # Load all CSVs into memory (fast)
-        self.hotels = self._load_csv("hotels.csv")
-        self.activities = self._load_csv("activities.csv")
-        self.places = self._load_csv("places.csv")
+        self.data = []
 
-        # Merge all data
-        self.all_items = (
-            self.hotels +
-            self.activities +
-            self.places
-        )
+        self._load_csv(COL_HOTEL, "Hotel")
+        self._load_csv(COL_ACT, "Activity")
+        self._load_csv(COL_PLACE, "Place")
 
-        print(f"HybridRAG Loaded: {len(self.all_items)} items.")
+        print(f"HybridRAG Loaded {len(self.data)} items.")
 
-    def _load_csv(self, filename):
-        path = os.path.join(DATA_DIR, filename)
+    # -----------------------------
+    # LOAD CSV
+    # -----------------------------
+    def _load_csv(self, path, dtype):
         if not os.path.exists(path):
-            logger.error(f"Missing CSV: {filename}")
-            return []
+            print(f"Missing CSV: {path}")
+            return
+        
+        df = pd.read_csv(path)
 
-        df = pd.read_csv(path).fillna("")
-        return df.to_dict(orient="records")
+        for _, row in df.iterrows():
+            item = row.to_dict()
+            item["data_type"] = dtype
+            item["eco_score"] = float(item.get("eco_score", 0))
+            self.data.append(item)
 
-    # -------------------------
-    # MAIN SEARCH SYSTEM
-    # -------------------------
-    def search(self, query: str, top_k: int = 10, min_eco_score: float = 7.0):
-        """
-        Hybrid Search Algorithm:
-        1. Keyword match (CSV)
-        2. Eco-score filter
-        3. AI ranking (optional)
-        """
+    # -----------------------------
+    # SIMPLE SMART SEARCH (NO QDRANT)
+    # -----------------------------
+    def search(self, query, top_k=10, min_eco_score=7.0):
 
-        query_lower = query.lower()
+        query = query.lower()
+        results = []
 
-        # Step 1 — Filter by eco score
-        eco_filtered = [
-            item for item in self.all_items
-            if float(item.get("eco_score", 0)) >= min_eco_score
-        ]
+        for item in self.data:
+            # Filter eco score
+            if item.get("eco_score", 0) < min_eco_score:
+                continue
 
-        # Step 2 — Keyword matching
-        matched = []
-        for item in eco_filtered:
             text = (
-                f"{item.get('name', '')} "
-                f"{item.get('location', '')} "
-                f"{item.get('description', '')}"
+                f"{item.get('name','')} "
+                f"{item.get('location','')} "
+                f"{item.get('description','')}"
             ).lower()
 
-            if any(word in text for word in query_lower.split()):
-                matched.append(item)
+            # keyword match score
+            score = 0
+            for word in query.split():
+                if word in text:
+                    score += 1
 
-        # Step 3 — If no match, fallback = return top eco items
-        if not matched:
-            matched = sorted(eco_filtered,
-                             key=lambda x: float(x.get("eco_score", 0)),
-                             reverse=True)
+            if score > 0:
+                item["match_score"] = score
+                results.append(item)
 
-        # Step 4 — Return top_k
-        return matched[:top_k]
+        # sort by match score
+        results = sorted(results, key=lambda x: x["match_score"], reverse=True)
+
+        return results[:top_k]
