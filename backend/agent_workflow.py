@@ -10,167 +10,155 @@ from backend.utils import extract_json
 from utils.schemas import ItinerarySchema
 from utils.logger import logger
 
-# =========================
+# ==========================================
 # Gemini Setup
-# =========================
+# ==========================================
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_NAME: str = os.getenv("MODEL", "gemini-1.5-flash")
+MODEL_NAME = os.getenv("MODEL", "gemini-1.5-flash")
 
 model = genai.GenerativeModel(
     MODEL_NAME,
-    safety_settings=[],
     generation_config={"response_mime_type": "application/json"}
 )
 
-# =========================
-# Load Prompts
-# =========================
-def load_prompt(name):
+# ==========================================
+# Load prompts
+# ==========================================
+def _load_prompt(filename: str) -> str:
     try:
-        with open(f"prompts/{name}", "r", encoding="utf-8") as f:
+        with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
             return f.read()
     except:
         return ""
 
+
 PROMPTS = {
-    "itinerary": load_prompt("itinerary_prompt.txt"),
-    "refine": load_prompt("refine_prompt.txt"),
-    "upgrade": load_prompt("upgrade_prompt.txt"),
-    "question": load_prompt("question_prompt.txt"),
-    "packing": load_prompt("packing_prompt.txt"),
-    "story": load_prompt("story_prompt.txt"),
+    "itinerary": _load_prompt("itinerary_prompt.txt"),
+    "refine": _load_prompt("refine_prompt.txt"),
+    "question": _load_prompt("question_prompt.txt"),
+    "packing": _load_prompt("packing_prompt.txt"),
+    "story": _load_prompt("story_prompt.txt"),
 }
 
-# =========================
-# SAFE FALLBACK
-# =========================
+# ==========================================
+# Safe Fallback
+# ==========================================
 def fallback_itinerary():
     return {
-        "plan": "### Demo Plan\nThis is the fallback itinerary for demo.",
+        "plan": "## Fallback Plan\nAI failed, generating a simple backup plan.",
         "activities": [],
         "total_cost": 0,
-        "eco_score": 7,
-        "carbon_saved": "10kg",
-        "waste_free_score": 7,
-        "plan_health_score": 80,
-        "budget_breakdown": {"Hotel": 300, "Food": 100},
-        "carbon_offset_suggestion": "Plant a tree.",
-        "ai_image_prompt": "Landscape",
-        "ai_time_planner_report": "Balanced.",
-        "cost_leakage_report": "None.",
-        "risk_safety_report": "Safe.",
-        "weather_contingency": "Keep sunscreen.",
-        "duplicate_trip_detector": "Unique.",
-        "experience_highlights": ["Beach", "Market"],
-        "trip_mood_indicator": {"Adventure": 60, "Relax": 40}
+        "eco_score": 5,
+        "carbon_saved": "0kg",
+        "budget_breakdown": {},
+        "waste_free_score": 5,
+        "plan_health_score": 50,
+        "experience_highlights": [],
+        "trip_mood_indicator": {},
     }
 
-# =========================
-# CLEAN JSON
-# =========================
-def clean_json(text: str):
-    if not text:
+# ==========================================
+# Helper: Clean JSON TXT
+# ==========================================
+def clean_json(txt: str):
+    if not txt:
         return None
-    text = text.replace("```json", "").replace("```", "").strip()
-    try:
-        return json.loads(text)
-    except:
-        return extract_json(text)
+    txt = txt.replace("```json", "").replace("```", "")
+    start = txt.find("{")
+    end = txt.rfind("}")
+    if start == -1 or end == -1:
+        return None
+    return txt[start:end+1]
 
-# =========================
-# MAIN WORKFLOW
-# =========================
+
+# ==========================================
+# AGENT WORKFLOW (FINAL SOLID VERSION)
+# ==========================================
 class AgentWorkflow:
 
-    def _ask(self, prompt: str) -> Optional[str]:
-        """Safe Gemini call – never crashes."""
+    # ---------------- Ask Gemini ----------------
+    def ask(self, prompt: str) -> Optional[str]:
         try:
-            resp = model.generate_content(prompt)
-            return getattr(resp, "text", "") or ""
-        except Exception as e:
-            logger.exception(e)
-            return ""
-
-    def _parse(self, raw: str) -> Optional[Dict[str, Any]]:
-        try:
-            cleaned = clean_json(raw)
-            if not cleaned:
-                return None
-            parsed = ItinerarySchema(**cleaned)
-            return parsed.model_dump()
+            response = model.generate_content(prompt)
+            return response.text
         except:
             return None
 
-    # ===============================
-    # MAIN PLAN
-    # ===============================
-    def run(self, *args, **kwargs) -> Dict[str, Any]:
+    # ---------------- Validate JSON ----------------
+    def parse_json(self, txt: str) -> Optional[Dict[str, Any]]:
         try:
-            prompt = PROMPTS["itinerary"].format(**kwargs)
-            raw = self._ask(prompt)
-            parsed = self._parse(raw)
-            return parsed or fallback_itinerary()
-        except:
-            return fallback_itinerary()
+            cleaned = clean_json(txt)
+            if not cleaned:
+                return None
 
-    # ===============================
-    # REFINER
-    # ===============================
-    def refine_plan(self, previous_plan_json, feedback_query):
-        try:
-            prompt = PROMPTS["refine"].format(
-                previous_plan_json=json.dumps(previous_plan_json),
-                feedback_query=feedback_query,
-                user_profile={},
-                priorities={},
-                rag_data=[],
-                travelers=1,
-                days=3,
-                budget=500
-            )
-            raw = self._ask(prompt)
-            parsed = self._parse(raw)
-            return parsed or previous_plan_json
-        except:
-            return previous_plan_json
+            raw = extract_json(cleaned)
+            if not raw:
+                raw = json.loads(cleaned)
 
-    # ===============================
-    # PACKING LIST
-    # ===============================
-    def generate_packing_list(self, **kwargs) -> str:
-        try:
-            prompt = PROMPTS["packing"].format(**kwargs)
-            return self._ask(prompt) or "### Packing List\n- Passport\n- Clothes\n- Water bottle"
-        except:
-            return "### Packing List\n- Passport\n- Clothes\n- Water bottle"
+            parsed = ItinerarySchema(**raw)
+            return parsed.model_dump()
 
-    # ===============================
-    # STORY
-    # ===============================
-    def generate_story(self, **kwargs) -> str:
-        try:
-            prompt = PROMPTS["story"].format(**kwargs)
-            return self._ask(prompt) or f"### Travel Story\nA beautiful journey."
         except:
-            return f"### Travel Story\nA beautiful journey."
+            return None
 
-    # ===============================
-    # QUESTION
-    # ===============================
-    def ask_question(self, **kwargs) -> str:
-        try:
-            prompt = PROMPTS["question"].format(**kwargs)
-            return self._ask(prompt) or "I don't know."
-        except:
-            return "I don't know."
+    # ---------------- Generate Plan ----------------
+    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
+        prompt = PROMPTS["itinerary"].format(
+            query=query,
+            days=days,
+            travelers=travelers,
+            budget=budget,
+            eco_priority=priorities.get("eco", 5),
+            budget_priority=priorities.get("budget", 5),
+            comfort_priority=priorities.get("comfort", 5),
+            user_name=user_profile.get("name", "Traveler"),
+            user_interests=user_profile.get("interests", []),
+            profile_ack="",
+            rag_data=rag_data
+        )
 
-    # ===============================
-    # UPGRADE
-    # ===============================
-    def get_upgrade_suggestions(self, **kwargs) -> str:
-        try:
-            prompt = PROMPTS["upgrade"].format(**kwargs)
-            return self._ask(prompt) or "- Upgrade to 5-star hotel."
-        except:
-            return "- Upgrade to 5-star hotel."
+        raw = self.ask(prompt)
+        parsed = self.parse_json(raw)
+        return parsed if parsed else fallback_itinerary()
+
+    # ---------------- Refine Plan ----------------
+    def refine_plan(self, old_json, feedback):
+        prompt = PROMPTS["refine"].format(
+            previous_plan_json=json.dumps(old_json),
+            feedback_query=feedback,
+            user_profile={},
+            priorities={},
+            rag_data=[],
+            travelers=1,
+            days=3,
+            budget=1000
+        )
+        raw = self.ask(prompt)
+        parsed = self.parse_json(raw)
+        return parsed if parsed else old_json
+
+    # ---------------- Packing ----------------
+    def generate_packing_list(self, plan_context, user_profile, list_type):
+        prompt = PROMPTS["packing"].format(
+            plan_context=plan_context,
+            user_profile=user_profile,
+            list_type=list_type
+        )
+        return self.ask(prompt) or "Could not generate packing list."
+
+    # ---------------- Story ----------------
+    def generate_story(self, plan_context, user_name):
+        prompt = PROMPTS["story"].format(
+            plan_context=plan_context,
+            user_name=user_name
+        )
+        return self.ask(prompt) or "Could not generate story."
+
+    # ---------------- Chat ----------------
+    def ask_question(self, plan_context, question):
+        prompt = PROMPTS["question"].format(
+            plan_context=plan_context,
+            question=question
+        )
+        return self.ask(prompt) or "Sorry, I don't know."
