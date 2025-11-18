@@ -1,25 +1,19 @@
 import os
-import json
-from typing import Dict, Any, Optional, List
-
 import google.generativeai as genai
 from dotenv import load_dotenv
-from pydantic import ValidationError
-
 from backend.utils import extract_json
 from utils.schemas import ItinerarySchema
 from utils.logger import logger
+from typing import Dict, Any, Optional, List
+from pydantic import ValidationError
+import json
 
-
-# ==========================
-# ENV + GEMINI SETUP
-# ==========================
+# Load environment
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_NAME: str = os.getenv("MODEL", "gemini-1.5-flash")
+MODEL_NAME = os.getenv("MODEL", "gemini-1.5-flash")
 
-
-# Safety config
+# Safety
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -27,6 +21,7 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
 ]
 
+# Model
 model = genai.GenerativeModel(
     MODEL_NAME,
     safety_settings=safety_settings,
@@ -34,15 +29,13 @@ model = genai.GenerativeModel(
 )
 
 
-# ==========================
-# PROMPT LOADER
-# ==========================
+# Load prompt files
 def _load_prompt(filename: str) -> str:
     try:
         with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
             return f.read()
-    except Exception as e:
-        logger.error(f"Prompt load error ({filename}) → {e}")
+    except:
+        logger.error(f"Missing prompt file: {filename}")
         return ""
 
 
@@ -56,12 +49,10 @@ PROMPTS = {
 }
 
 
-# ==========================
-# FALLBACK ITINERARY (Never Crashes)
-# ==========================
+# -------- FALLBACK SAFE ITINERARY --------
 def fallback_itinerary() -> Dict[str, Any]:
     return {
-        "plan": "No plan generated.",
+        "plan": "### Day 1\nFallback itinerary because AI failed.",
         "activities": [],
         "total_cost": 0,
         "eco_score": 7.0,
@@ -70,57 +61,52 @@ def fallback_itinerary() -> Dict[str, Any]:
         "plan_health_score": 50,
         "budget_breakdown": {},
         "carbon_offset_suggestion": "Plant a tree.",
-        "ai_image_prompt": "Eco-friendly travel scene.",
-        "ai_time_planner_report": "Basic schedule.",
+        "ai_image_prompt": "Eco travel scene.",
+        "ai_time_planner_report": "Fallback schedule.",
         "cost_leakage_report": "None.",
-        "risk_safety_report": "Standard precautions.",
-        "weather_contingency": "Monitor weather updates.",
-        "duplicate_trip_detector": "Unique trip detected.",
+        "risk_safety_report": "Standard travel safety.",
+        "weather_contingency": "Check local weather.",
+        "duplicate_trip_detector": "Unique trip.",
         "experience_highlights": [],
         "trip_mood_indicator": {}
     }
 
 
-# ==========================
-# AGENT WORKFLOW
-# ==========================
+# -------- AGENT WORKFLOW CLASS --------
 class AgentWorkflow:
 
-    # -----------------------------------
-    # RAW CALL TO GEMINI
-    # -----------------------------------
+    # Gemini Call
     def _ask(self, prompt: str) -> Optional[str]:
         try:
             response = model.generate_content(prompt)
             return response.text
         except Exception as e:
-            logger.error(f"Gemini API call failed → {e}")
+            logger.error(f"Gemini Failed → {e}")
             return None
 
-    # -----------------------------------
-    # JSON VALIDATOR
-    # -----------------------------------
+    # CLEAN + PARSE JSON
     def _validate_json_output(self, llm_output: str) -> Optional[Dict[str, Any]]:
         try:
-            json_dict = extract_json(llm_output)
+            # Hard clean to remove garbage
+            cleaned = llm_output.strip()
+            cleaned = cleaned.replace("```json", "").replace("```", "")
+            cleaned = cleaned.replace("\n'", "").replace("'\n", "")
+            cleaned = cleaned.replace("'\n", "")
+            cleaned = cleaned.replace("`", "")
+            cleaned = cleaned.lstrip("'").lstrip('"')
 
-            if not json_dict:
-                raise ValueError("No JSON detected.")
+            data = extract_json(cleaned)
+            if not data:
+                raise ValueError("JSON not found in LLM output")
 
-            parsed = ItinerarySchema(**json_dict)
+            parsed = ItinerarySchema(**data)
             return parsed.model_dump()
 
-        except ValidationError as e:
-            logger.error(f"Schema validation failed → {e}")
-            return None
-
         except Exception as e:
-            logger.error(f"JSON parsing failed → {e}")
+            logger.error(f"JSON validation failed → {e}")
             return None
 
-    # -----------------------------------
-    # MAIN PLAN GENERATOR
-    # -----------------------------------
+    # MAIN PLAN GENERATION
     def run(
         self,
         query: str,
@@ -144,21 +130,18 @@ class AgentWorkflow:
             comfort_priority=priorities.get("comfort", 5),
             user_name=user_profile.get("name", "Traveler"),
             user_interests=user_profile.get("interests", []),
-            profile_ack="",  # Optional
+            profile_ack="",
             rag_data=rag_data
         )
 
-        llm_raw = self._ask(prompt)
-
-        if not llm_raw:
+        raw = self._ask(prompt)
+        if not raw:
             return fallback_itinerary()
 
-        parsed = self._validate_json_output(llm_raw)
+        parsed = self._validate_json_output(raw)
         return parsed if parsed else fallback_itinerary()
 
-    # -----------------------------------
     # REFINER
-    # -----------------------------------
     def refine_plan(
         self,
         previous_plan_json: Dict[str, Any],
@@ -182,38 +165,31 @@ class AgentWorkflow:
             budget=budget
         )
 
-        llm_raw = self._ask(prompt)
-
-        if not llm_raw:
+        raw = self._ask(prompt)
+        if not raw:
             return fallback_itinerary()
 
-        parsed = self._validate_json_output(llm_raw)
+        parsed = self._validate_json_output(raw)
         return parsed if parsed else fallback_itinerary()
 
-    # -----------------------------------
-    # PREMIUM UPGRADES
-    # -----------------------------------
+    # UPGRADE
     def get_upgrade_suggestions(self, plan_context: str, user_profile: Dict, rag_data: List[Dict]) -> str:
         prompt = PROMPTS["upgrade"].format(
             plan_context=plan_context,
             user_profile=user_profile,
             rag_data=rag_data
         )
-        return self._ask(prompt) or "Unable to generate upgrades."
+        return self._ask(prompt) or "No upgrade suggestions available."
 
-    # -----------------------------------
-    # CHATBOT QUESTION
-    # -----------------------------------
+    # CHATBOT
     def ask_question(self, plan_context: str, question: str) -> str:
         prompt = PROMPTS["question"].format(
             plan_context=plan_context,
             question=question
         )
-        return self._ask(prompt) or "Sorry, I couldn't answer that."
+        return self._ask(prompt) or "Sorry, I couldn't answer your question."
 
-    # -----------------------------------
     # PACKING LIST
-    # -----------------------------------
     def generate_packing_list(self, plan_context: str, user_profile: Dict, list_type: str) -> str:
         prompt = PROMPTS["packing"].format(
             user_profile=user_profile,
@@ -222,9 +198,7 @@ class AgentWorkflow:
         )
         return self._ask(prompt) or "Could not generate packing list."
 
-    # -----------------------------------
-    # STORY GENERATOR
-    # -----------------------------------
+    # STORY
     def generate_story(self, plan_context: str, user_name: str) -> str:
         prompt = PROMPTS["story"].format(
             user_name=user_name,
