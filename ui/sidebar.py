@@ -1,33 +1,42 @@
 import streamlit as st
 from utils.profile import load_profile, save_profile
 from utils.logger import logger
-from backend.agent_workflow import AgentWorkflow
-from backend.rag_engine import RAGEngine
 import time
-from typing import Any
 
 
-def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> None:
-    """Renders the sidebar UI and handles plan generation."""
+# ======================================================
+# SIDEBAR RENDER FUNCTION (FIXED)
+# ======================================================
+def render_sidebar(agent, rag, app_version: str):
 
     with st.sidebar:
-        # ---------------------------
+
+        # -------------------------
         # USER PROFILE
-        # ---------------------------
+        # -------------------------
         st.header("👤 My Profile")
 
         user_name = st.text_input(
             "Your Name",
             value=st.session_state.get("user_name", ""),
             key="user_name_input",
-            help="Enter your name"
+            help="Enter your name to store & load your profile.",
         )
 
+        # Save user name in session
         if user_name:
             st.session_state.user_name = user_name
 
+        # Load profile
         profile = load_profile(user_name) if user_name else {}
 
+        # --------------------------------------------
+        # 🔧 FIX: trip_interests safe initialization
+        # --------------------------------------------
+        if "trip_interests" not in st.session_state:
+            st.session_state.trip_interests = profile.get("interests", [])
+
+        # Interests widget (NO default= → FIXED)
         fav_interests = st.multiselect(
             "My Favorite Interests",
             ["Beach", "History", "Adventure", "Food", "Nature"],
@@ -41,6 +50,7 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
             100
         )
 
+        # Save button
         if st.button("Save Profile", use_container_width=True):
             if len(user_name) < 2:
                 st.error("Name must be at least 2 characters.")
@@ -50,9 +60,9 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
 
         st.divider()
 
-        # ---------------------------
+        # -------------------------
         # TRIP BUILDER
-        # ---------------------------
+        # -------------------------
         st.header("📍 Plan a New Trip")
         st.subheader("Trip Priorities")
 
@@ -60,11 +70,14 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
         budget_priority = st.slider("🟥 Budget Priority", 1, 10, 6, key="trip_budget_priority")
         comfort_priority = st.slider("🟧 Comfort Priority", 1, 10, 5, key="trip_comfort_priority")
 
-        trip_interests = st.multiselect(
+        # --------------------------------------------
+        # 🔧 FIXED INTERESTS FOR TRIP (NO DEFAULT)
+        # --------------------------------------------
+        st.multiselect(
             "Interests for this trip",
             ["Beach", "History", "Adventure", "Food", "Nature"],
-            default=profile.get("interests", []),
-            key="trip_interests"
+            key="trip_interests",
+            help="Select interests for this specific trip."
         )
 
         trip_budget = st.slider(
@@ -88,23 +101,24 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
             key="trip_min_eco"
         )
 
-        # ---------------------------
+        # -------------------------
         # GENERATE PLAN BUTTON
-        # ---------------------------
+        # -------------------------
         if st.button("Generate Plan 🚀", use_container_width=True):
 
             if not user_name:
                 st.error("Please enter your name first.")
                 return
 
-            if not trip_interests:
+            if not st.session_state.trip_interests:
                 st.error("Please select at least one interest.")
                 return
 
-            _clear_session_state()
+            _clear_session()
 
             with st.status(f"Generating plan for {user_name}...", expanded=True) as status:
                 try:
+                    # Step 1
                     status.write("🧠 Step 1: Building your query...")
 
                     priorities = {
@@ -115,12 +129,13 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
 
                     query = (
                         f"A {days}-day trip to {location} for {travelers} people "
-                        f"with interests: {', '.join(trip_interests)}."
+                        f"with interests: {', '.join(st.session_state.trip_interests)}."
                     )
 
                     user_profile = load_profile(user_name)
                     user_profile["name"] = user_name
 
+                    # Step 2
                     status.write("🔍 Step 2: Searching eco-friendly locations...")
 
                     rag_results = rag.search(
@@ -133,13 +148,14 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
                         status.update(label="❌ No eco-friendly results found.", state="error")
                         return
 
+                    # Step 3
                     status.write("🤖 Step 3: Creating itinerary...")
 
                     itinerary = agent.run(
                         query=query,
                         rag_data=rag_results,
                         budget=trip_budget,
-                        interests=trip_interests,
+                        interests=st.session_state.trip_interests,
                         days=days,
                         location=location,
                         travelers=travelers,
@@ -148,7 +164,7 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
                     )
 
                     if itinerary:
-                        _set_session_state_on_generate(itinerary, query, priorities)
+                        _save_generated(itinerary, query, priorities)
                         status.update(label="✅ Done!", state="complete")
                         st.toast("Your eco-trip plan is ready! 🌍✨")
                     else:
@@ -163,10 +179,10 @@ def render_sidebar(agent: AgentWorkflow, rag: RAGEngine, app_version: str) -> No
         st.caption(f"EcoGuide AI — Version {app_version}")
 
 
-# ---------------------------------------------------
-# Utilities
-# ---------------------------------------------------
-def _clear_session_state():
+# ======================================================
+# HELPERS
+# ======================================================
+def _clear_session():
     st.session_state.itinerary = None
     st.session_state.chat_history = []
     st.session_state.packing_list = {}
@@ -174,18 +190,12 @@ def _clear_session_state():
     st.session_state.upgrade_suggestions = ""
 
 
-def _set_session_state_on_generate(itinerary: dict, query: str, priorities: dict) -> None:
-    """Writes everything into session_state so UI never breaks."""
-
+def _save_generated(itinerary, query, priorities):
     st.session_state.itinerary = itinerary
     st.session_state.query = query
-
     st.session_state.current_trip_days = st.session_state.trip_days
     st.session_state.current_trip_budget = st.session_state.trip_budget
     st.session_state.current_trip_location = st.session_state.trip_location
     st.session_state.current_trip_travelers = st.session_state.trip_travelers
     st.session_state.current_trip_interests = st.session_state.trip_interests
     st.session_state.current_trip_priorities = priorities
-
-    if "user_name" not in st.session_state:
-        st.session_state.user_name = "Traveler"   
