@@ -1,5 +1,4 @@
 import os
-import json
 from typing import Dict, Any, Optional, List
 
 import google.generativeai as genai
@@ -23,19 +22,17 @@ model = genai.GenerativeModel(
 )
 
 # =========================
-# Safe fallback itinerary
+# FALLBACK PLAN
 # =========================
-def fallback_itinerary() -> Dict[str, Any]:
+def fallback_itinerary():
     return {
         "plan": "Your eco-friendly trip plan is ready!",
         "activities": [],
-        "total_cost": 0,
-        "eco_score": 7,
-        "ai_image_prompt": "eco friendly travel landscape"
+        "eco_score": 7
     }
 
 # =========================
-# AGENT WORKFLOW 
+# AGENT WORKFLOW (NO PROMPTS)
 # =========================
 class AgentWorkflow:
 
@@ -46,26 +43,42 @@ class AgentWorkflow:
         except:
             return "Your trip is ready!"
 
-    # SAFE — no JSON parsing
-    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
+    # MAIN PLAN (MARKDOWN ONLY)
+    def run(
+        self,
+        query: str,
+        rag_data: List[Dict],
+        budget: int,
+        interests: List[str],
+        days: int,
+        location: str,
+        travelers: int,
+        user_profile: Dict,
+        priorities: Dict,
+    ) -> Dict[str, Any]:
+
         try:
             prompt = f"""
-You are an AI travel generator.
-Create a short eco-friendly trip plan in MARKDOWN.
-No JSON. No special formatting.
+You are an eco-friendly travel planner.
+
+Generate a short travel plan in MARKDOWN.
+NO JSON. NO codeblock. No special format.
 
 User Query: {query}
 Days: {days}
 Travelers: {travelers}
-Budget: {budget}
 Location: {location}
+Budget: {budget}
 Interests: {interests}
 Priorities: {priorities}
+
+Write a clear, friendly trip plan.
 """
-            result = self._ask(prompt)
+
+            text = self._ask(prompt)
 
             return {
-                "plan": result,
+                "plan": text,
                 "activities": [],
                 "eco_score": 7
             }
@@ -73,37 +86,35 @@ Priorities: {priorities}
         except:
             return fallback_itinerary()
 
-    # SAFE REFINER
+    # SIMPLE REFINER
     def refine_plan(self, previous_plan_json, feedback_query):
         try:
             prompt = f"""
-Refine this trip plan based on user feedback.
+Refine the following trip plan based on feedback.
+Write plain text only.
 
-User Feedback: {feedback_query}
+Feedback: {feedback_query}
 
-Old Plan:
+Old plan:
 {previous_plan_json}
-
-Return improved plain text ONLY.
 """
-
             refined = self._ask(prompt)
-            return {
-                "plan": refined,
-                "activities": []
-            }
+            return {"plan": refined}
         except:
             return previous_plan_json
 
-    # No parsing — always returns text
+    # PACKING LIST
     def generate_packing_list(self, plan_context, user_profile, list_type):
         return f"### {list_type} Packing List\n- Clothes\n- Water bottle\n- Eco-friendly items"
 
+    # STORY
     def generate_story(self, plan_context, user_name):
-        return f"{user_name} begins an eco-friendly adventure filled with joy and nature."
+        return f"{user_name} enjoyed an amazing, sustainable journey."
 
+    # QUESTIONS
     def ask_question(self, plan_context, question):
-        return f"Answer: Based on your plan — {question}"
+        return f"Based on your plan → {question}"
 
+    # UPGRADES
     def get_upgrade_suggestions(self, plan_context, user_profile, rag_data):
-        return "- Upgrade hotel\n- Add premium eco activity\n- Try a hidden gem location"
+        return "- Upgrade hotel\n- Add premium eco activity\n- Explore hidden gems"
