@@ -136,8 +136,35 @@ class RAGEngine:
 
 
     def search(self, query, top_k=10, min_eco_score=7.0):
-        vec = self.embedder.encode(query)
+        vector = self.embedder.encode(query)
 
+        try:
+            results = self.client.search_points(
+                collection_name=COLLECTION,
+                query_vector=vector,
+                limit=top_k,
+                with_payload=True,
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="eco_score",
+                            range=models.Range(gte=min_eco_score)
+                        )
+                    ]
+                )
+            )
+        except Exception as e:
+            print("SEARCH ERROR:", e)
+            return []
+
+        output = []
+        for r in results:
+            try:
+                output.append(r.payload)
+            except:
+                pass
+
+        return output
         results = self.client.search(
             collection_name=COLLECTION,
             query_vector=vec,
