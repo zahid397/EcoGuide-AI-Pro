@@ -1,17 +1,24 @@
 import streamlit as st
 import urllib.parse
-from typing import List
 
-def render_share_tab(days: int, location: str, interests: List[str], budget: int) -> None:
-    st.subheader("Share Your Trip Plan")
+def render_share_tab(days, location, interests, budget):
+    st.subheader("🔗 Share Your Trip Plan")
     
+    # সোশ্যাল মিডিয়া টেক্সট তৈরি
     interests_str = ", ".join(interests)
-    plan_summary = f"Check out my {days}-day eco-trip to {location} planned by EcoGuide AI! We're focusing on {interests_str} with a budget of ${budget}."
+    plan_summary = f"I just planned a {days}-day eco-trip to {location} using EcoGuide AI! 🌍 We're focusing on {interests_str} with a budget of ${budget}. #SustainableTravel"
     
-    st.markdown("#### Share on WhatsApp")
+    # হোয়াটসঅ্যাপ লিংক জেনারেট
     whatsapp_text = urllib.parse.quote_plus(plan_summary)
-    st.link_button("Share on WhatsApp 💬", f"https-://wa.me/?text={whatsapp_text}", use_container_width=True)
+    whatsapp_url = f"https://wa.me/?text={whatsapp_text}"
     
-    st.markdown("#### Instagram Caption Idea")
-    st.text_area("Caption:", f"{plan_summary} #EcoGuideAI #SustainableTravel #{location.replace(' ','')}", height=100)
-  
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 💬 WhatsApp")
+        st.link_button("Share on WhatsApp", whatsapp_url, use_container_width=True)
+        
+    with col2:
+        st.markdown("#### 📸 Instagram Caption")
+        st.text_area("Copy this caption:", value=plan_summary, height=100)
+        
