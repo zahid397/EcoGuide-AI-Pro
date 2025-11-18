@@ -1,11 +1,37 @@
 import streamlit as st
 
-def render(data):
-    st.metric("Health Score", f"{data.get('plan_health_score', 0)}/100")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.warning(f"⏱️ Time: {data.get('ai_time_planner_report', 'N/A')}")
-        st.info(f"🛡️ Risk: {data.get('risk_safety_report', 'N/A')}")
-    with c2:
-        st.error(f"💰 Leaks: {data.get('cost_leakage_report', 'N/A')}")
-        
+def render_analysis(itinerary: dict):
+    """Renders the Analysis tab safely."""
+
+    st.subheader("🔬 Trip Analysis")
+
+    # --- Eco & Safety Analysis ---
+    st.write("### 🌱 Eco & Safety Insights")
+
+    st.write(f"**Carbon Saved:** {itinerary.get('carbon_saved', '0kg')}")
+    st.write(f"**Waste-Free Score:** {itinerary.get('waste_free_score', 0)}/10")
+    st.write(f"**Risk & Safety Report:** {itinerary.get('risk_safety_report', 'No data')}")
+
+    st.divider()
+
+    # --- Time Planning ---
+    st.write("### ⏱️ Time Planner Report")
+    st.info(itinerary.get("ai_time_planner_report", "No time analysis available."))
+
+    st.divider()
+
+    # --- Cost Leakage ---
+    st.write("### 💸 Cost Leakage Report")
+    st.warning(itinerary.get("cost_leakage_report", "No cost issues detected."))
+
+    st.divider()
+
+    # --- Weather Contingency ---
+    st.write("### 🌦 Weather Contingency")
+    st.write(itinerary.get("weather_contingency", "No weather notes available."))
+
+    st.divider()
+
+    # Duplicate Trip Detector
+    st.write("### 🔁 Duplicate Trip Check")
+    st.write(itinerary.get("duplicate_trip_detector", "Unique trip"))
