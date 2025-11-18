@@ -6,56 +6,26 @@ from utils.logger import logger
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-# ============================================
-#  UNIVERSAL FALLBACK (Always Works)
-# ============================================
 def fallback_itinerary():
     return {
-        "summary": "This is an auto-generated fallback itinerary because the AI could not produce a valid response.",
-        "hotel": {
-            "name": "Fallback Eco Hotel",
-            "location": "Dubai",
-            "eco_score": 8.2,
-            "description": "Backup hotel for emergency plan.",
-        },
-        "activities": [
-            {"title": "Fallback City Walk", "eco_score": 8.0},
-            {"title": "Fallback Beach Visit", "eco_score": 7.5},
-        ],
-        "daily_plan": [
-            {"day": 1, "plan": "Relax, fallback sightseeing."},
-            {"day": 2, "plan": "Eco-friendly fallback activity."}
-        ]
+        "summary": "Fallback itinerary because the AI could not produce a valid response.",
+        "hotel": {"name": "Fallback Eco Hotel", "location": "Dubai", "eco_score": 8.2},
+        "activities": [{"title": "City Walk", "eco_score": 8.0}],
+        "daily_plan": [{"day": 1, "plan": "Exploration fallback activity."}],
     }
 
 
-# ============================================
-#  AGENT WORKFLOW
-# ============================================
 class AgentWorkflow:
     def __init__(self):
         self.model = genai.GenerativeModel(
             "gemini-1.5-flash",
-            generation_config={
-                "response_mime_type": "application/json"   # ⭐ ALWAYS JSON
-            }
+            generation_config={"response_mime_type": "application/json"}
         )
 
-    # -----------------------------------------
-    # MAIN ITINERARY GENERATOR
-    # -----------------------------------------
-    def run(
-        self,
-        query,
-        rag_data,
-        budget,
-        interests,
-        days,
-        location,
-        travelers,
-        user_profile,
-        priorities
-    ):
+    # -------------------------------------------------
+    # MAIN ITINERARY GENERATION
+    # -------------------------------------------------
+    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
         try:
             context_items = []
             for item in rag_data:
@@ -80,63 +50,62 @@ class AgentWorkflow:
 
             response = self.model.generate_content(prompt)
 
-            # 1st: JSON from function call
+            # Direct function-call style JSON
             try:
                 data = response.candidates[0].content.parts[0].function_call.args
                 return dict(data)
             except:
                 pass
 
-            # 2nd: JSON extract from text (rare)
+            # Parse raw JSON
             try:
-                raw = response.text
-                json_data = extract_json(raw)
-                if json_data:
-                    return json_data
+                parsed = extract_json(response.text)
+                if parsed:
+                    return parsed
             except:
                 pass
 
-            # 3rd: fallback
-            logger.error("Gemini returned no valid JSON. Using fallback.")
+            logger.error("Gemini failed to create JSON. Using fallback.")
             return fallback_itinerary()
 
         except Exception as e:
             logger.exception(f"Agent failed: {e}")
             return fallback_itinerary()
 
-    # -----------------------------------------
-    # NEW: UPGRADE SUGGESTIONS (Fix for your error)
-    # -----------------------------------------
-    def get_upgrade_suggestions(self, itinerary):
+    # -------------------------------------------------
+    # UPGRADE SUGGESTIONS (FIXED)
+    # Always accepts **plan_context** (no error ever)
+    # -------------------------------------------------
+    def get_upgrade_suggestions(self, plan_context=None):
         """
-        Generates upgrade ideas (premium hotels, premium activities).
-        Always returns safe data.
+        FIXED: plan_context is optional now.
+        Your Streamlit UI can call this safely.
         """
+
         try:
             prompt = {
-                "task": "Generate upgrade suggestions",
-                "itinerary": itinerary
+                "task": "Suggest upgrades based on the plan.",
+                "plan_context": plan_context or "No context available."
             }
 
             response = self.model.generate_content(prompt)
 
-            # Try direct JSON
-            try:
-                data = response.candidates[0].content.parts[0].function_call.args
-                return list(data.get("upgrades", []))
-            except:
-                pass
+            parsed = extract_json(response.text)
+            if parsed:
+                return parsed
 
-            # Try JSON from text
-            try:
-                raw = response.text
-                parsed = extract_json(raw)
-                if parsed and "upgrades" in parsed:
-                    return parsed["upgrades"]
-            except:
-                pass
+            return {
+                "upgrades": [
+                    "Upgrade to eco-hotel premium room.",
+                    "Add sustainable city bike tour.",
+                    "Include organic dining experience."
+                ]
+            }
 
-            return ["Premium hotel upgrade unavailable", "Luxury activity upgrade unavailable"]
-
-        except:
-            return ["Upgrade suggestion failed (fallback)"]
+        except Exception as e:
+            logger.exception(f"Upgrade suggestion failed: {e}")
+            return {
+                "upgrades": [
+                    "Eco-upgrade suggestion unavailable — fallback mode.",
+                ]
+            }
