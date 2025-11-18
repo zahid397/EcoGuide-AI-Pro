@@ -1,0 +1,1 @@
+print('EcoGuide AI Placeholder App')

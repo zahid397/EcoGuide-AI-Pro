@@ -1,0 +1,1 @@
+def generate_pdf(data): return b'PDF'
