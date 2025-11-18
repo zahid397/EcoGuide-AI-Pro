@@ -1,6 +1,6 @@
 from functools import lru_cache
 from backend.agent_workflow import AgentWorkflow
-from backend.rag_engine import RAGEngine  # This should still be used for search
+from backend.rag_engine import RAGEngine
 
 @lru_cache(maxsize=1)
 def get_agent():
