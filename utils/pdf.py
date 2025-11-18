@@ -1,53 +1,57 @@
 from fpdf import FPDF
-from typing import Dict, Any
 from utils.logger import logger
 
-def generate_pdf(itinerary: Dict[str, Any]) -> bytes:
-    """Generate a safe PDF from the itinerary."""
+def generate_pdf(itinerary_data):
     try:
         pdf = FPDF()
         pdf.add_page()
 
-        # Title
-        pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, "EcoGuide AI - Travel Plan", ln=True, align="C")
+        # 1. Title
+        pdf.set_font("Arial", "B", 18)
+        pdf.cell(0, 12, "EcoGuide AI — Your Travel Plan", ln=True, align="C")
 
         pdf.ln(5)
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, "Trip Summary", ln=True)
+        pdf.set_font("Arial", "", 12)
 
-        # Summary block
+        # 2. Summary
+        summary = itinerary_data.get("summary", "No summary available.")
+        safe_summary = summary.encode("latin-1", "replace").decode("latin-1")
+        pdf.multi_cell(0, 8, safe_summary)
+
+        pdf.ln(10)
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, "Activities & Items", ln=True)
+
+        # 3. Activities
         pdf.set_font("Arial", "", 11)
-        summary = itinerary.get("summary", "No summary available.")
-        summary = summary.encode("latin-1", "replace").decode("latin-1")
-        pdf.multi_cell(0, 6, summary)
+        activities = itinerary_data.get("activities", [])
 
-        # Activities
-        pdf.ln(4)
+        if not activities:
+            pdf.multi_cell(0, 6, "- No activities found.")
+        else:
+            for item in activities:
+                line = f"- {item.get('name','Unknown')} | Eco: {item.get('eco_score','N/A')}"
+                safe_line = line.encode("latin-1", "replace").decode("latin-1")
+                pdf.multi_cell(0, 6, safe_line)
+
+        # 4. Daily Plan
+        pdf.ln(10)
         pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, "Activities", ln=True)
+        pdf.cell(0, 10, "Daily Plan", ln=True)
+        pdf.set_font("Arial", "", 11)
 
-        pdf.set_font("Arial", "", 10)
-        for item in itinerary.get("activities", []):
-            line = f"- {item.get('title', item.get('name','Unknown'))} | Eco: {item.get('eco_score', 'N/A')}"
-            line = line.encode("latin-1", "replace").decode("latin-1")
-            pdf.multi_cell(0, 5, line)
+        daily_plan = itinerary_data.get("daily_plan", [])
 
-        # Budget breakdown
-        pdf.ln(4)
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, "Budget Breakdown", ln=True)
+        if not daily_plan:
+            pdf.multi_cell(0, 6, "- No daily plan available.")
+        else:
+            for day in daily_plan:
+                d = f"Day {day.get('day')}: {day.get('plan')}"
+                safe_day = d.encode("latin-1", "replace").decode("latin-1")
+                pdf.multi_cell(0, 6, safe_day)
 
-        pdf.set_font("Arial", "", 10)
-        budget_data = itinerary.get("budget_breakdown", {})
-        if isinstance(budget_data, dict):
-            for category, cost in budget_data.items():
-                line = f"{category}: ${cost}"
-                line = line.encode("latin-1", "replace").decode("latin-1")
-                pdf.multi_cell(0, 5, line)
-
-        # Output
-        return pdf.output(dest="S").encode("latin-1")
+        # RETURN PDF bytes
+        return bytes(pdf.output(dest="S"))
 
     except Exception as e:
         logger.exception(f"PDF generation failed: {e}")
