@@ -24,10 +24,10 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
 ]
 
+# ❌ REMOVE response_mime_type — AI must return MARKDOWN + JSON ✨
 model = genai.GenerativeModel(
     MODEL_NAME,
-    safety_settings=safety_settings,
-    generation_config={"response_mime_type": "application/json"}
+    safety_settings=safety_settings
 )
 
 # =========================
