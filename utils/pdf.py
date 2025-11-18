@@ -2,8 +2,14 @@ from fpdf import FPDF
 from typing import Dict, Any
 from utils.logger import logger
 
+def clean_text(text: str) -> str:
+    """Forces text to be PDF-compatible (ASCII only)."""
+    if not text: return ""
+    # ইমোজি এবং নন-ল্যাটিন অক্ষর বাদ দেওয়া হচ্ছে যাতে ক্র্যাশ না করে
+    return text.encode('latin-1', 'ignore').decode('latin-1')
+
 def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
-    """Generates a PDF bytes object safely, removing unsupported characters."""
+    """Generates a PDF bytes object safely."""
     try:
         pdf = FPDF()
         pdf.add_page()
@@ -14,16 +20,11 @@ def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
         pdf.cell(0, 10, "Detailed Itinerary", 0, 1, 'L')
         pdf.set_font("Arial", '', 11)
         
-        # --- CRITICAL FIX: Handle Text Encoding ---
+        # --- FIX: Clean Text Aggressively ---
         raw_plan = str(itinerary_data.get('plan', 'No detailed plan available.'))
-        
-        # Step 1: Remove Markdown symbols
         plan_text = raw_plan.replace('### ', '').replace('## ', '').replace('* ', '- ')
         
-        # Step 2: Convert to Latin-1 (Remove Emojis/Bangla to prevent crash)
-        plan_text = plan_text.encode('latin-1', 'replace').decode('latin-1')
-        
-        pdf.multi_cell(0, 5, plan_text)
+        pdf.multi_cell(0, 5, clean_text(plan_text))
         
         pdf.ln(10)
         pdf.set_font("Arial", 'B', 14)
@@ -33,11 +34,12 @@ def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
         activities = itinerary_data.get('activities', [])
         if activities:
             for item in activities:
-                name = str(item.get('name', 'Unknown')).encode('latin-1', 'replace').decode('latin-1')
-                dtype = str(item.get('data_type', 'Activity'))
-                eco = str(item.get('eco_score', 'N/A'))
+                name = clean_text(str(item.get('name', 'Unknown')))
+                dtype = clean_text(str(item.get('data_type', 'Activity')))
+                eco = clean_text(str(item.get('eco_score', 'N/A')))
+                cost = clean_text(str(item.get('cost', 0)))
                 
-                item_text = f"- {name} ({dtype}) | Eco: {eco}"
+                item_text = f"- {name} ({dtype}) | Eco: {eco} | ${cost}"
                 pdf.multi_cell(0, 5, item_text)
         
         # Budget Section
@@ -52,9 +54,8 @@ def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
         budget_data = itinerary_data.get('budget_breakdown', {})
         if budget_data:
             for category, cost in budget_data.items():
-                cat_text = str(category).encode('latin-1', 'replace').decode('latin-1')
-                pdf.cell(60, 8, cat_text, 1)
-                pdf.cell(30, 8, str(cost), 1, 1)
+                pdf.cell(60, 8, clean_text(str(category)), 1)
+                pdf.cell(30, 8, clean_text(str(cost)), 1, 1)
                 
         return pdf.output(dest='S').encode('latin-1')
         
