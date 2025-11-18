@@ -10,21 +10,21 @@ from backend.utils import extract_json
 from utils.schemas import ItinerarySchema
 from utils.logger import logger
 
-# ==========================================
+# =========================
 # Gemini Setup
-# ==========================================
+# =========================
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-MODEL_NAME = os.getenv("MODEL", "gemini-1.5-flash")
+MODEL_NAME: str = os.getenv("MODEL", "gemini-1.5-flash")
 
 model = genai.GenerativeModel(
     MODEL_NAME,
     generation_config={"response_mime_type": "application/json"}
 )
 
-# ==========================================
-# Load prompts
-# ==========================================
+# =========================
+# Load Prompt Files
+# =========================
 def _load_prompt(filename: str) -> str:
     try:
         with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
@@ -32,77 +32,78 @@ def _load_prompt(filename: str) -> str:
     except:
         return ""
 
-
 PROMPTS = {
     "itinerary": _load_prompt("itinerary_prompt.txt"),
     "refine": _load_prompt("refine_prompt.txt"),
     "question": _load_prompt("question_prompt.txt"),
     "packing": _load_prompt("packing_prompt.txt"),
     "story": _load_prompt("story_prompt.txt"),
+    "upgrade": "",
 }
 
-# ==========================================
-# Safe Fallback
-# ==========================================
+# =========================
+# Fallback Safe Output
+# =========================
 def fallback_itinerary():
     return {
-        "plan": "## Fallback Plan\nAI failed, generating a simple backup plan.",
+        "plan": "## No plan generated.\nTry again.",
         "activities": [],
         "total_cost": 0,
-        "eco_score": 5,
+        "eco_score": 6,
         "carbon_saved": "0kg",
-        "budget_breakdown": {},
         "waste_free_score": 5,
         "plan_health_score": 50,
+        "budget_breakdown": {},
         "experience_highlights": [],
         "trip_mood_indicator": {},
     }
 
-# ==========================================
-# Helper: Clean JSON TXT
-# ==========================================
-def clean_json(txt: str):
-    if not txt:
+# =========================
+# Clean JSON Response
+# =========================
+def clean_json(text: str):
+    if not text:
         return None
-    txt = txt.replace("```json", "").replace("```", "")
-    start = txt.find("{")
-    end = txt.rfind("}")
-    if start == -1 or end == -1:
+    text = text.replace("```json", "").replace("```", "")
+    s, e = text.find("{"), text.rfind("}")
+    if s == -1 or e == -1:
         return None
-    return txt[start:end+1]
+    return text[s:e + 1]
 
 
-# ==========================================
-# AGENT WORKFLOW (FINAL SOLID VERSION)
-# ==========================================
+# =========================
+# MAIN WORKFLOW CLASS
+# =========================
 class AgentWorkflow:
 
-    # ---------------- Ask Gemini ----------------
     def ask(self, prompt: str) -> Optional[str]:
         try:
-            response = model.generate_content(prompt)
-            return response.text
-        except:
+            r = model.generate_content(prompt)
+            return getattr(r, "text", None)
+        except Exception as e:
+            logger.error(f"LLM failed: {e}")
             return None
 
-    # ---------------- Validate JSON ----------------
-    def parse_json(self, txt: str) -> Optional[Dict[str, Any]]:
+    def parse(self, txt: str):
         try:
             cleaned = clean_json(txt)
             if not cleaned:
                 return None
 
-            raw = extract_json(cleaned)
-            if not raw:
-                raw = json.loads(cleaned)
+            data = extract_json(cleaned)
+            if not data:
+                data = json.loads(cleaned)
 
-            parsed = ItinerarySchema(**raw)
+            parsed = ItinerarySchema(**data)
             return parsed.model_dump()
 
-        except:
+        except Exception as e:
+            logger.error(f"JSON parse error: {e}")
             return None
 
-    # ---------------- Generate Plan ----------------
+    # =======================
+    # PLAN GENERATOR
+    # =======================
     def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
         prompt = PROMPTS["itinerary"].format(
             query=query,
@@ -119,26 +120,33 @@ class AgentWorkflow:
         )
 
         raw = self.ask(prompt)
-        parsed = self.parse_json(raw)
+        parsed = self.parse(raw)
+
         return parsed if parsed else fallback_itinerary()
 
-    # ---------------- Refine Plan ----------------
-    def refine_plan(self, old_json, feedback):
-        prompt = PROMPTS["refine"].format(
-            previous_plan_json=json.dumps(old_json),
-            feedback_query=feedback,
-            user_profile={},
-            priorities={},
-            rag_data=[],
-            travelers=1,
-            days=3,
-            budget=1000
-        )
-        raw = self.ask(prompt)
-        parsed = self.parse_json(raw)
-        return parsed if parsed else old_json
+    # =======================
+    # SAFE REFINER
+    # =======================
+    def refine_plan(self, previous_plan_json: Dict[str, Any], feedback_query: str):
+        prompt = f"""
+You are a travel plan refiner.
+User feedback: "{feedback_query}"
 
-    # ---------------- Packing ----------------
+Here is the previous JSON plan:
+{json.dumps(previous_plan_json, ensure_ascii=False)}
+
+Return a NEW improved JSON itinerary.
+ALWAYS output valid JSON ONLY.
+"""
+
+        raw = self.ask(prompt)
+        parsed = self.parse(raw)
+
+        return parsed if parsed else previous_plan_json
+
+    # =======================
+    # PACKING LIST
+    # =======================
     def generate_packing_list(self, plan_context, user_profile, list_type):
         prompt = PROMPTS["packing"].format(
             plan_context=plan_context,
@@ -147,7 +155,9 @@ class AgentWorkflow:
         )
         return self.ask(prompt) or "Could not generate packing list."
 
-    # ---------------- Story ----------------
+    # =======================
+    # STORY
+    # =======================
     def generate_story(self, plan_context, user_name):
         prompt = PROMPTS["story"].format(
             plan_context=plan_context,
@@ -155,10 +165,18 @@ class AgentWorkflow:
         )
         return self.ask(prompt) or "Could not generate story."
 
-    # ---------------- Chat ----------------
+    # =======================
+    # Q&A
+    # =======================
     def ask_question(self, plan_context, question):
         prompt = PROMPTS["question"].format(
             plan_context=plan_context,
             question=question
         )
-        return self.ask(prompt) or "Sorry, I don't know."
+        return self.ask(prompt) or "Sorry, I couldn't answer."
+
+    # =======================
+    # UPGRADE (OPTIONAL)
+    # =======================
+    def get_upgrade_suggestions(self, plan_context, user_profile, rag_data):
+        return "- Upgrade suggestions disabled for demo -"
