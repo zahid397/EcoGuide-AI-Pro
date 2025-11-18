@@ -1,143 +1,99 @@
-import json
-import traceback
-from typing import Any, Dict, List
+# backend/agent_workflow.py
 
-from backend.utils import extract_json
+import json
+from typing import Dict, Any, List
+from backend.gemini_client import ask_gemini
+from backend.utils_json import extract_json
 
 
 class AgentWorkflow:
     """
-    AI workflow engine for generating trip itinerary.
-    Works with any RAG results and produces structured JSON.
+    Main travel-planning AI workflow.
+    Takes: user query + RAG search results
+    Sends to: Gemini
+    Gets: Structured JSON itinerary
     """
 
     def __init__(self):
-        # If you use Gemini:
-        from openai import OpenAI
-        self.client = OpenAI()  # Uses OPENAI_API_KEY or GOOGLE_API_KEY through env
+        pass
 
-    # ------------------------------------------------------------------
-    def run(
-        self,
-        query: str,
-        rag_data: List[Dict[str, Any]],
-        budget: int,
-        interests: List[str],
-        days: int,
-        location: str,
-        travelers: int,
-        user_profile: Dict[str, Any],
-        priorities: Dict[str, int],
-    ) -> Dict[str, Any]:
-        """
-        Main function to generate itinerary with AI help.
-        Returns structured dict (JSON).
-        """
+    # ---------------------------------------
+    # Build context from RAG results
+    # ---------------------------------------
+    def _build_context(self, rag_data: List[Dict[str, Any]]) -> str:
+        if not rag_data:
+            return "No RAG data available."
 
-        try:
-            prompt = self._build_prompt(
-                query=query,
-                rag_data=rag_data,
-                budget=budget,
-                interests=interests,
-                days=days,
-                location=location,
-                travelers=travelers,
-                user_profile=user_profile,
-                priorities=priorities,
-            )
+        lines = []
+        for item in rag_data:
+            name = item.get("name", "Unknown")
+            loc = item.get("location", "")
+            eco = item.get("eco_score", "")
+            desc = item.get("description", "")
 
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.4,
-            )
+            lines.append(f"{name} ({loc}) — Eco Score {eco}/10\n{desc}")
 
-            raw_output = response.choices[0].message["content"]
+        return "\n\n".join(lines)
 
-            parsed = extract_json(raw_output)
-            if not parsed:
-                return {
-                    "error": "AI returned invalid JSON.",
-                    "raw_response": raw_output,
-                }
-
-            return parsed
-
-        except Exception as e:
-            return {
-                "error": str(e),
-                "trace": traceback.format_exc(),
-            }
-
-    # ------------------------------------------------------------------
-    def _build_prompt(
-        self,
-        query: str,
-        rag_data: List[Dict[str, Any]],
-        budget: int,
-        interests: List[str],
-        days: int,
-        location: str,
-        travelers: int,
-        user_profile: Dict[str, Any],
-        priorities: Dict[str, int],
-    ) -> str:
-        """
-        Create structured AI prompt with instructions + JSON format.
-        """
-
-        rag_text = json.dumps(rag_data, indent=2)
-
+    # ---------------------------------------
+    # Build full Gemini prompt
+    # ---------------------------------------
+    def _build_prompt(self, query: str, context: str) -> str:
         return f"""
 You are EcoGuide AI — an expert eco-friendly travel planner.
+You ALWAYS output pure JSON. No extra text.
 
-User Query:
+Use ONLY the following eco-locations:
+
+{context}
+
+User requested:
 {query}
 
-User Profile:
-{json.dumps(user_profile, indent=2)}
+Now generate a JSON itinerary with EXACT structure:
 
-Trip Preferences:
-- Location: {location}
-- Travelers: {travelers}
-- Days: {days}
-- Interests: {', '.join(interests)}
-- Budget: {budget}
-- Priorities: {priorities}
-
-Eco-Friendly Options from Database (RAG results):
-{rag_text}
-
-=========================
-IMPORTANT RESPONSE RULES
-=========================
-1. Always respond ONLY with **valid JSON**.
-2. Do NOT include explanations outside the JSON.
-3. The JSON MUST contain:
-
-{
-  "summary": "short overview of the trip",
+{{
+  "trip_overview": "Short overview",
   "daily_plan": [
-     {
-       "day": 1,
-       "activities": [
-          {
-            "name": "",
-            "eco_score": 0,
-            "cost": 0,
-            "location": "",
-            "description": ""
-          }
-       ]
-     }
+      {{
+        "day": 1,
+        "title": "Day title",
+        "activities": ["..."],
+        "hotel": "..."
+      }}
   ],
-  "estimated_total_cost": 0,
-  "packing_list": [],
-  "tips": []
-}
+  "packing_list": ["item1", "item2"],
+  "travel_story": "A short story",
+  "upgrade_suggestions": "..."
+}}
 
-4. Ensure activities come **only from RAG data**.
-5. Ensure total cost does not exceed budget.
-6. Make the trip realistic, eco-friendly and safe.
+⚠️ IMPORTANT:
+- DO NOT add text outside JSON.
+- DO NOT apologize.
+- If info missing, guess intelligently.
 """
+    # ---------------------------------------
+    # MAIN RUN METHOD
+    # ---------------------------------------
+    def run(self, query: str, rag_data=None, **kwargs) -> Dict[str, Any]:
+
+        # 1. build context
+        context = self._build_context(rag_data)
+
+        # 2. build prompt
+        prompt = self._build_prompt(query, context)
+
+        # 3. ask Gemini
+        raw_output = ask_gemini(prompt)
+
+        # 4. try extract JSON
+        parsed = extract_json(raw_output)
+
+        if parsed:
+            return parsed
+
+        # 5. fallback
+        return {
+            "error": "Gemini returned invalid JSON.",
+            "raw_output": raw_output
+        }
