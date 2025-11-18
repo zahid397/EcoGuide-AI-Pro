@@ -10,7 +10,7 @@ load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 model = genai.GenerativeModel("gemini-1.5-flash")
 
-# Default Fallback Prompt (Safe if text files are missing)
+# ডিফল্ট প্রম্পট (যদি ফাইল না থাকে)
 DEFAULT_PROMPT = """
 You are an expert travel planner. Create a valid JSON itinerary based on the user request.
 Output ONLY JSON matching this schema:
@@ -58,53 +58,33 @@ class AgentWorkflow:
     # 1. MAIN RUN FUNCTION
     # ---------------------------------------------------------
     def run(self, query, rag_data, **kwargs):
-        """
-        Generates a new plan.
-        Using **kwargs allows this function to accept ANY arguments 
-        (like budget, days, travelers) without crashing.
-        """
         try:
             prompt_template = _load_prompt("itinerary_prompt.txt")
-            
-            # Prepare RAG data safely
             rag_str = json.dumps(rag_data, default=str)
             
-            # Basic replacements
             prompt = prompt_template.replace("{query}", str(query))
             prompt = prompt.replace("{rag_data}", rag_str)
             
-            # Dynamic replacements for any other variables passed in kwargs
-            # (e.g., {budget}, {days}, {travelers}, {user_name})
             for key, value in kwargs.items():
                 placeholder = "{" + key + "}"
-                # Only replace if the placeholder exists in the text file
                 if placeholder in prompt:
                     prompt = prompt.replace(placeholder, str(value))
 
-            # Final Cleanup: Remove any leftover {placeholders} to avoid confusion
-            # (Optional step, but good for safety)
-            
             return self._validate(self._ask(prompt))
             
         except Exception as e:
             logger.exception(f"Run Workflow Failed: {e}")
-            # Fallback
             fallback = f"{DEFAULT_PROMPT}\nUser Query: {query}\nData: {str(rag_data)[:1000]}"
             return self._validate(self._ask(fallback))
 
     # ---------------------------------------------------------
-    # 2. REFINE PLAN (This is where your error was)
+    # 2. REFINE PLAN
     # ---------------------------------------------------------
     def refine_plan(self, previous_plan_json=None, feedback_query="", rag_data=[], **kwargs):
-        """
-        Refines an existing plan.
-        ✅ FIX: Added 'previous_plan_json' and '**kwargs' to accept all data from UI.
-        """
         try:
             rag_str = json.dumps(rag_data, default=str)
             plan_str = str(previous_plan_json)
 
-            # Construct a strong instruction manually to ensure it works
             prompt = f"""
             You are a travel assistant. Refine the following JSON plan based on user feedback.
             
@@ -119,7 +99,7 @@ class AgentWorkflow:
             
             **Instructions:**
             1. Modify the plan according to the feedback (e.g. make it cheaper, change location).
-            2. Keep the exact same JSON structure (plan, activities, eco_score, etc.).
+            2. Keep the exact same JSON structure.
             3. Output ONLY valid JSON.
             """
             
@@ -131,22 +111,25 @@ class AgentWorkflow:
             return None
 
     # ---------------------------------------------------------
-    # 3. OTHER HELPERS
+    # 3. OTHER HELPERS (Fixed Story & Packing List)
     # ---------------------------------------------------------
     def ask_question(self, plan_context, question):
-        prompt = f"Context: {str(plan_context)[:5000]}\n\nUser Question: {question}\n\nAnswer briefly."
+        # Fix: Ensure inputs are strings
+        prompt = f"Context: {str(plan_context)[:5000]}\n\nUser Question: {str(question)}\n\nAnswer briefly."
         return self._ask(prompt) or "I couldn't answer that."
 
     def generate_packing_list(self, plan_context, user_profile, list_type):
-        # Using str() ensures we don't crash if an object is passed
-        prompt = f"Create a {list_type} packing list for this trip:\n{str(plan_context)[:3000]}"
+        # Fix: Ensure inputs are strings to prevent crash
+        prompt = f"Create a {str(list_type)} packing list for this trip based on profile {str(user_profile)}:\n{str(plan_context)[:3000]}"
         return self._ask(prompt) or "Packing list unavailable."
 
     def generate_story(self, plan_context, user_name):
-        prompt = f"Write a short travel story for {user_name} based on this plan:\n{str(plan_context)[:3000]}"
+        # Fix: Ensure inputs are strings
+        prompt = f"Write a short travel story for {str(user_name)} based on this plan:\n{str(plan_context)[:3000]}"
         return self._ask(prompt) or "Story generation failed."
 
     def get_upgrade_suggestions(self, plan_context, user_profile, rag_data):
+        # Fix: Ensure inputs are strings
         prompt = f"Suggest 3 premium upgrades for this plan:\n{str(plan_context)[:3000]}"
         return self._ask(prompt) or "No upgrades found."
         
