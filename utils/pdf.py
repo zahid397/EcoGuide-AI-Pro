@@ -1,94 +1,59 @@
 from fpdf import FPDF
 from typing import Dict, Any
 from utils.logger import logger
+import re
 
-def safe_text(text: Any) -> str:
-    """Converts any text to safe Latin-1 for FPDF, replacing emojis."""
-    if not isinstance(text, str):
-        text = str(text)
-
-    return text.encode("latin-1", "replace").decode("latin-1")
-
+def safe_text(text: str) -> str:
+    if not text:
+        return ""
+    text = text.replace("### ", "").replace("## ", "").replace("* ", "- ")
+    text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+    return text
 
 def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
-    """Fully safe PDF generator (no crashes)."""
     try:
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
 
-        # Title
-        pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, safe_text("EcoGuide AI - Your Travel Plan"), 0, 1, "C")
-
-        # -------------------------
-        # PLAN SECTION
-        # -------------------------
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, safe_text("Detailed Itinerary"), 0, 1)
-
-        pdf.set_font("Arial", "", 11)
-        raw_plan = itinerary_data.get("plan", "No plan available.")
-
-        # FIX: if plan is dict/list
-        if not isinstance(raw_plan, str):
-            raw_plan = safe_text(str(raw_plan))
-
-        plan_text = (
-            raw_plan.replace("###", "")
-            .replace("##", "")
-            .replace("*", "-")
-        )
-
-        pdf.multi_cell(0, 6, safe_text(plan_text))
-
-        # -------------------------
-        # ACTIVITIES
-        # -------------------------
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "EcoGuide AI - Travel Plan", 0, 1, 'C')
         pdf.ln(5)
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, safe_text("Selected Activities"), 0, 1)
 
-        pdf.set_font("Arial", "", 11)
+        # ---------------- PLAN ----------------
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, "Your Plan", 0, 1)
+        pdf.set_font("Arial", '', 11)
+
+        plan_text = safe_text(itinerary_data.get("plan", "No plan available."))
+        pdf.multi_cell(0, 5, plan_text)
+
+        # ---------------- ACTIVITIES ----------------
+        pdf.ln(8)
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, "Activities", 0, 1)
+        pdf.set_font("Arial", '', 10)
+
         activities = itinerary_data.get("activities", [])
-
-        if not activities:
-            pdf.cell(0, 8, safe_text("No activities listed."), 0, 1)
-        else:
+        if activities:
             for item in activities:
-                name = safe_text(item.get("name", "Activity"))
-                eco = item.get("eco_score", "N/A")
-                dtype = safe_text(item.get("data_type", "Activity"))
-                line = f"- {name} | {dtype} | Eco Score: {eco}"
-                pdf.multi_cell(0, 6, safe_text(line))
-
-        # -------------------------
-        # BUDGET TABLE
-        # -------------------------
-        pdf.ln(5)
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, safe_text("Budget Breakdown"), 0, 1)
-
-        pdf.set_font("Arial", "B", 10)
-        pdf.cell(80, 8, "Category", 1)
-        pdf.cell(40, 8, "Cost ($)", 1, 1)
-
-        pdf.set_font("Arial", "", 10)
-        budget_data = itinerary_data.get("budget_breakdown", {})
-
-        if isinstance(budget_data, dict):
-            for cat, val in budget_data.items():
-                pdf.cell(80, 8, safe_text(cat), 1)
-                pdf.cell(40, 8, safe_text(val), 1, 1)
+                line = f"- {item.get('name', 'Item')} | Eco: {item.get('eco_score', 'N/A')}"
+                pdf.multi_cell(0, 5, safe_text(line))
         else:
-            pdf.cell(0, 8, safe_text("No budget details available."), 1, 1)
+            pdf.multi_cell(0, 5, "No activities found.")
 
-        # -------------------------
-        # OUTPUT AS BYTES
-        # -------------------------
-        pdf_bytes = pdf.output(dest="S").encode("latin-1", "replace")
-        return pdf_bytes
+        # ---------------- BUDGET ----------------
+        pdf.ln(8)
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, "Budget Breakdown", 0, 1)
+        pdf.set_font("Arial", '', 10)
+
+        for k, v in itinerary_data.get("budget_breakdown", {}).items():
+            pdf.cell(60, 8, safe_text(str(k)), 1)
+            pdf.cell(30, 8, safe_text(str(v)), 1, 1)
+
+        return pdf.output(dest="S").encode("latin-1", "replace")
 
     except Exception as e:
-        logger.exception(f"PDF generation failed: {e}")
+        logger.exception(f"PDF Error: {e}")
         raise Exception("Could not generate PDF. Please try again.")
