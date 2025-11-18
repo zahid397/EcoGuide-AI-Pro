@@ -1,99 +1,105 @@
-# backend/agent_workflow.py
+import os
+from utils.logger import logger
 
-import json
-from typing import Dict, Any, List
-from backend.gemini_client import ask_gemini
-from backend.utils_json import extract_json
+# ---- Try OpenAI ----
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+
+try:
+    if OPENAI_KEY:
+        from openai import OpenAI
+        openai_client = OpenAI(api_key=OPENAI_KEY)
+        HAS_OPENAI = True
+    else:
+        HAS_OPENAI = False
+except Exception as e:
+    logger.warning(f"OpenAI load failed: {e}")
+    HAS_OPENAI = False
+
+
+# ---- Try GEMINI ----
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+
+try:
+    if GEMINI_KEY:
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_KEY)
+        gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+        HAS_GEMINI = True
+    else:
+        HAS_GEMINI = False
+except Exception as e:
+    logger.warning(f"Gemini load failed: {e}")
+    HAS_GEMINI = False
 
 
 class AgentWorkflow:
-    """
-    Main travel-planning AI workflow.
-    Takes: user query + RAG search results
-    Sends to: Gemini
-    Gets: Structured JSON itinerary
-    """
+    """Hybrid LLM Agent: Works with OpenAI + Gemini automatically."""
 
     def __init__(self):
-        pass
+        if not HAS_OPENAI and not HAS_GEMINI:
+            raise RuntimeError(
+                "❌ No AI Model Available.\n"
+                "Please set at least one key:\n"
+                "• OPENAI_API_KEY\n"
+                "• GEMINI_API_KEY"
+            )
 
-    # ---------------------------------------
-    # Build context from RAG results
-    # ---------------------------------------
-    def _build_context(self, rag_data: List[Dict[str, Any]]) -> str:
-        if not rag_data:
-            return "No RAG data available."
+    # ------------------------------
+    # MAIN EXECUTION
+    # ------------------------------
+    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
+        prompt = self._build_prompt(query, rag_data, budget, interests, days, location, travelers, user_profile, priorities)
 
-        lines = []
-        for item in rag_data:
-            name = item.get("name", "Unknown")
-            loc = item.get("location", "")
-            eco = item.get("eco_score", "")
-            desc = item.get("description", "")
+        # -----------------------
+        # 1️⃣ Try OPENAI first
+        # -----------------------
+        if HAS_OPENAI:
+            try:
+                response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": "You are an eco-travel planning AI."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3
+                )
+                return response.choices[0].message["content"]
+            except Exception as e:
+                logger.warning(f"OpenAI failed, switching to Gemini: {e}")
 
-            lines.append(f"{name} ({loc}) — Eco Score {eco}/10\n{desc}")
+        # -----------------------
+        # 2️⃣ Fallback → Gemini
+        # -----------------------
+        if HAS_GEMINI:
+            try:
+                response = gemini_model.generate_content(prompt)
+                return response.text
+            except Exception as e:
+                logger.error(f"Gemini failed: {e}")
+                return None
 
-        return "\n\n".join(lines)
+        return None
 
-    # ---------------------------------------
-    # Build full Gemini prompt
-    # ---------------------------------------
-    def _build_prompt(self, query: str, context: str) -> str:
+    # -----------------------
+    # PROMPT BUILDER
+    # -----------------------
+    def _build_prompt(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
         return f"""
-You are EcoGuide AI — an expert eco-friendly travel planner.
-You ALWAYS output pure JSON. No extra text.
+Generate a structured eco-friendly travel plan.
 
-Use ONLY the following eco-locations:
+User: {user_profile.get('name')}
+Location: {location}
+Days: {days}
+Budget: {budget}
+Travelers: {travelers}
+Interests: {interests}
+Priorities: {priorities}
 
-{context}
+Eco-friendly places from RAG:
+{rag_data}
 
-User requested:
+Query:
 {query}
 
-Now generate a JSON itinerary with EXACT structure:
-
-{{
-  "trip_overview": "Short overview",
-  "daily_plan": [
-      {{
-        "day": 1,
-        "title": "Day title",
-        "activities": ["..."],
-        "hotel": "..."
-      }}
-  ],
-  "packing_list": ["item1", "item2"],
-  "travel_story": "A short story",
-  "upgrade_suggestions": "..."
-}}
-
-⚠️ IMPORTANT:
-- DO NOT add text outside JSON.
-- DO NOT apologize.
-- If info missing, guess intelligently.
+Return the BEST possible plan.
 """
-    # ---------------------------------------
-    # MAIN RUN METHOD
-    # ---------------------------------------
-    def run(self, query: str, rag_data=None, **kwargs) -> Dict[str, Any]:
-
-        # 1. build context
-        context = self._build_context(rag_data)
-
-        # 2. build prompt
-        prompt = self._build_prompt(query, context)
-
-        # 3. ask Gemini
-        raw_output = ask_gemini(prompt)
-
-        # 4. try extract JSON
-        parsed = extract_json(raw_output)
-
-        if parsed:
-            return parsed
-
-        # 5. fallback
-        return {
-            "error": "Gemini returned invalid JSON.",
-            "raw_output": raw_output
-        }
