@@ -49,3 +49,7 @@ def render_packing(agent, itinerary: dict, user_name: str):
         except Exception as e:
             logger.exception(f"Packing list error: {e}")
             st.error("⚠️ Could not generate packing list.")
+
+# ⭐⭐⭐ FIX: This alias makes UI call work ⭐⭐⭐
+def render_packing_tab(agent, itinerary, user_name):
+    return render_packing(agent, itinerary, user_name)
