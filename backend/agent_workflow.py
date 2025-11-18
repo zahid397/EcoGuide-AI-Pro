@@ -6,14 +6,16 @@ from utils.logger import logger
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-def fallback_itinerary():
-    return {
-        "summary": "Fallback itinerary",
-        "activities": [],
-        "daily_plan": []
-    }
+# -----------------------------
+# SAFE FALLBACK
+# -----------------------------
+def fallback(text="Not available"):
+    return {"result": text}
 
 
+# -----------------------------
+# MAIN WORKFLOW
+# -----------------------------
 class AgentWorkflow:
     def __init__(self):
         self.model = genai.GenerativeModel(
@@ -22,57 +24,40 @@ class AgentWorkflow:
         )
 
     # =====================================================
-    # MAIN TRIP GENERATION
+    # MAIN TRIP PLAN GENERATOR
     # =====================================================
     def run(self, query, rag_data, budget, interests, days,
             location, travelers, user_profile, priorities):
 
+        prompt = {
+            "task": "generate_itinerary",
+            "query": query,
+            "budget": budget,
+            "days": days,
+            "travelers": travelers,
+            "location": location,
+            "interests": interests,
+            "user_profile": user_profile,
+            "priorities": priorities,
+            "context_items": rag_data
+        }
+
         try:
-            context_items = []
-            for item in rag_data:
-                context_items.append({
-                    "name": item.get("name", ""),
-                    "type": item.get("data_type", ""),
-                    "location": item.get("location", ""),
-                    "eco_score": item.get("eco_score", 0),
-                    "description": item.get("description", "")
-                })
-
-            prompt = {
-                "query": query,
-                "budget": budget,
-                "days": days,
-                "travelers": travelers,
-                "interests": interests,
-                "location": location,
-                "priorities": priorities,
-                "user_profile": user_profile,
-                "context_items": context_items
-            }
-
             response = self.model.generate_content(prompt)
-
-            try:
-                raw = response.text
-                parsed = extract_json(raw)
-                if parsed:
-                    return parsed
-            except:
-                pass
-
-            return fallback_itinerary()
-
+            data = extract_json(response.text)
+            return data or fallback("Could not make full plan")
         except Exception as e:
             logger.exception(e)
-            return fallback_itinerary()
+            return fallback()
 
     # =====================================================
-    # PACKING LIST
+    # PACKING LIST (UI calls with 3 args)
     # =====================================================
-    def generate_packing_list(self, itinerary, user_profile=None):
+    def generate_packing_list(self, list_type, itinerary, user_profile=None):
 
         prompt = {
             "task": "packing_list",
+            "list_type": list_type,
             "itinerary": itinerary,
             "user_profile": user_profile
         }
@@ -80,12 +65,12 @@ class AgentWorkflow:
         try:
             response = self.model.generate_content(prompt)
             data = extract_json(response.text)
-            return data or {"items": ["Passport", "Wallet", "Water Bottle"]}
+            return data or {"items": ["Passport", "Shoes", "Water Bottle"]}
         except:
-            return {"items": ["Passport", "Wallet", "Water Bottle"]}
+            return {"items": ["Passport", "Shoes", "Water Bottle"]}
 
     # =====================================================
-    # STORY
+    # STORY (UI calls with 2 args)
     # =====================================================
     def generate_story(self, itinerary, user_name="Traveler"):
 
@@ -98,30 +83,30 @@ class AgentWorkflow:
         try:
             response = self.model.generate_content(prompt)
             data = extract_json(response.text)
-            return data or {"story": f"{user_name} had a peaceful eco-friendly adventure."}
+            return data or {"story": f"{user_name} had a nice eco trip."}
         except:
-            return {"story": f"{user_name} had a peaceful eco-friendly adventure."}
+            return {"story": f"{user_name} had a nice eco trip."}
 
     # =====================================================
-    # CHATBOT
+    # CHAT TAB (UI calls 2 args)
     # =====================================================
-    def ask_question(self, question, plan_context=None):
+    def ask_question(self, question, itinerary):
 
         prompt = {
             "task": "qa",
             "question": question,
-            "context": plan_context
+            "itinerary": itinerary
         }
 
         try:
             response = self.model.generate_content(prompt)
             data = extract_json(response.text)
-            return data or {"answer": "Sorry, I could not answer that."}
+            return data or {"answer": "Sorry, I couldn't answer that."}
         except:
-            return {"answer": "Sorry, I could not answer that."}
+            return {"answer": "Sorry, I couldn't answer that."}
 
     # =====================================================
-    # UPGRADE SUGGESTIONS
+    # UPGRADE (UI calls 1 arg)
     # =====================================================
     def get_upgrade_suggestions(self, itinerary):
 
@@ -133,6 +118,6 @@ class AgentWorkflow:
         try:
             response = self.model.generate_content(prompt)
             data = extract_json(response.text)
-            return data or {"suggestions": ["Try adding more eco-friendly activities."]}
+            return data or {"suggestions": ["Try adding more eco activities."]}
         except:
-            return {"suggestions": ["Try adding more eco-friendly activities."]}
+            return {"suggestions": ["Try adding more eco activities."]}
