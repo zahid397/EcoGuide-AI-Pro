@@ -8,12 +8,9 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def fallback_itinerary():
     return {
-        "summary": "Fallback itinerary.",
-        "hotel": {"name": "Fallback Hotel"},
-        "activities": [{"title": "Fallback Activity"}],
-        "daily_plan": [{"day": 1, "plan": "Relax"}],
-        "eco_score": 8.0,
-        "carbon_saved": "5kg"
+        "summary": "Fallback itinerary",
+        "activities": [],
+        "daily_plan": []
     }
 
 
@@ -24,126 +21,118 @@ class AgentWorkflow:
             generation_config={"response_mime_type": "application/json"}
         )
 
-    # =========================================================
-    # MAIN TRIP GENERATOR
-    # =========================================================
-    def run(
-        self, query, rag_data, budget, interests, days, location,
-        travelers, user_profile, priorities
-    ):
+    # =====================================================
+    # MAIN TRIP GENERATION
+    # =====================================================
+    def run(self, query, rag_data, budget, interests, days,
+            location, travelers, user_profile, priorities):
+
         try:
+            context_items = []
+            for item in rag_data:
+                context_items.append({
+                    "name": item.get("name", ""),
+                    "type": item.get("data_type", ""),
+                    "location": item.get("location", ""),
+                    "eco_score": item.get("eco_score", 0),
+                    "description": item.get("description", "")
+                })
+
             prompt = {
                 "query": query,
                 "budget": budget,
                 "days": days,
-                "location": location,
                 "travelers": travelers,
                 "interests": interests,
+                "location": location,
                 "priorities": priorities,
                 "user_profile": user_profile,
-                "context_items": rag_data
+                "context_items": context_items
             }
 
             response = self.model.generate_content(prompt)
 
             try:
-                data = response.candidates[0].content.parts[0].function_call.args
-                return dict(data)
+                raw = response.text
+                parsed = extract_json(raw)
+                if parsed:
+                    return parsed
             except:
                 pass
 
-            parsed = extract_json(response.text)
-            if parsed:
-                return parsed
+            return fallback_itinerary()
 
         except Exception as e:
             logger.exception(e)
+            return fallback_itinerary()
 
-        return fallback_itinerary()
+    # =====================================================
+    # PACKING LIST
+    # =====================================================
+    def generate_packing_list(self, itinerary, user_profile=None):
 
-    # =========================================================
-    # FIXED: REFINER (UI calls this correctly)
-    # =========================================================
-    def refine_plan(self, plan_context, refinement_query):
-        """UI passes: plan_context + user text"""
+        prompt = {
+            "task": "packing_list",
+            "itinerary": itinerary,
+            "user_profile": user_profile
+        }
+
         try:
-            prompt = f"""
-            Improve this itinerary based on user request.
-            ITINERARY: {plan_context}
-            REQUEST: {refinement_query}
-            Return JSON only.
-            """
-
-            resp = self.model.generate_content(prompt)
-            data = extract_json(resp.text)
-            if data:
-                return data
-
+            response = self.model.generate_content(prompt)
+            data = extract_json(response.text)
+            return data or {"items": ["Passport", "Wallet", "Water Bottle"]}
         except:
-            pass
+            return {"items": ["Passport", "Wallet", "Water Bottle"]}
 
-        return plan_context
+    # =====================================================
+    # STORY
+    # =====================================================
+    def generate_story(self, itinerary, user_name="Traveler"):
 
-    # =========================================================
-    # FIXED: STORY GENERATOR (UI passes plan_context)
-    # =========================================================
-    def generate_story(self, plan_context):
-        prompt = f"""
-        Write a fun travel story based on this itinerary.
-        Return JSON: {{"story": "..."}}
-        ITINERARY: {plan_context}
-        """
+        prompt = {
+            "task": "travel_story",
+            "itinerary": itinerary,
+            "user_name": user_name
+        }
+
         try:
-            resp = self.model.generate_content(prompt)
-            data = extract_json(resp.text)
-            return data.get("story", "")
+            response = self.model.generate_content(prompt)
+            data = extract_json(response.text)
+            return data or {"story": f"{user_name} had a peaceful eco-friendly adventure."}
         except:
-            return "Could not generate story."
+            return {"story": f"{user_name} had a peaceful eco-friendly adventure."}
 
-    # =========================================================
-    # FIXED: PACKING LIST GENERATOR (UI passes plan_context)
-    # =========================================================
-    def generate_packing_list(self, plan_context):
-        prompt = f"""
-        Create a packing list for this trip.
-        Return JSON: {{"items": ["..."]}}
-        ITINERARY: {plan_context}
-        """
-        try:
-            resp = self.model.generate_content(prompt)
-            data = extract_json(resp.text)
-            return data.get("items", [])
-        except:
-            return ["Passport", "Eco bag", "Water bottle"]
+    # =====================================================
+    # CHATBOT
+    # =====================================================
+    def ask_question(self, question, plan_context=None):
 
-    # =========================================================
-    # FIXED: CHATBOT (UI passes plan_context + question)
-    # =========================================================
-    def ask_question(self, question, plan_context):
-        prompt = f"""
-        User asked: {question}
-        Use this itinerary as context: {plan_context}
-        Answer in JSON: {{"answer": "..."}}
-        """
-        try:
-            resp = self.model.generate_content(prompt)
-            data = extract_json(resp.text)
-            return data.get("answer", "")
-        except:
-            return "Sorry, I couldn't answer that."
+        prompt = {
+            "task": "qa",
+            "question": question,
+            "context": plan_context
+        }
 
-    # =========================================================
-    # FIXED: UPGRADE SUGGESTIONS
-    # =========================================================
-    def get_upgrade_suggestions(self, plan_context):
-        prompt = f"""
-        Suggest 3 improvements.
-        Return JSON: {{"upgrades": ["..."]}}
-        PLAN: {plan_context}
-        """
         try:
-            resp = self.model.generate_content(prompt)
-            data = extract_json(resp.text)
-            return data.get("upgrades", [])
+            response = self.model.generate_content(prompt)
+            data = extract_json(response.text)
+            return data or {"answer": "Sorry, I could not answer that."}
         except:
-            return ["Add more eco spots", "Improve food choices", "Extend beach time"]
+            return {"answer": "Sorry, I could not answer that."}
+
+    # =====================================================
+    # UPGRADE SUGGESTIONS
+    # =====================================================
+    def get_upgrade_suggestions(self, itinerary):
+
+        prompt = {
+            "task": "upgrade_suggestions",
+            "itinerary": itinerary
+        }
+
+        try:
+            response = self.model.generate_content(prompt)
+            data = extract_json(response.text)
+            return data or {"suggestions": ["Try adding more eco-friendly activities."]}
+        except:
+            return {"suggestions": ["Try adding more eco-friendly activities."]}
