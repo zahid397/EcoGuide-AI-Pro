@@ -1,74 +1,68 @@
 import os
 import pandas as pd
-from uuid import uuid4
 from qdrant_client import QdrantClient, models
+from sklearn.feature_extraction.text import TfidfVectorizer
+from uuid import uuid4
 from utils.logger import logger
 
 COLLECTION = "eco_travel_v3"
 DATA_DIR = "data"
 
-# ALL CSV FILES
-CSV_HOTELS = os.path.join(DATA_DIR, "hotels.csv")
-CSV_ACTIVITIES = os.path.join(DATA_DIR, "activities.csv")
-CSV_PLACES = os.path.join(DATA_DIR, "places.csv")
 
-VECTOR_DIM = 32   # small dimension to avoid errors
-
-
-# ------------------------------------------------------------
-# Light-Weight Keyword Based Embedding (Fastest + No Errors)
-# ------------------------------------------------------------
-class TinyEmbedder:
-    """
-    No torch, no transformer, no sentence-transformer.
-    Pure keyword hashing → ALWAYS fixed 32-d vector.
-    """
-    def __init__(self, dim=VECTOR_DIM):
-        self.dim = dim
-
-    def encode(self, text: str):
-        vec = [0] * self.dim
-        for word in text.lower().split():
-            vec[hash(word) % self.dim] += 1
-        return vec
-
-
-# ------------------------------------------------------------
-# RAG ENGINE (Final Stable Version)
-# ------------------------------------------------------------
 class RAGEngine:
+
     def __init__(self):
-
+        # Local persistent storage
         self.client = QdrantClient(path="qdrant_local")
-        self.embedder = TinyEmbedder()
 
-        # Ensure fresh collection
-        try:
-            self.client.get_collection(COLLECTION)
-            print("🧹 Recreating Qdrant collection...")
-            self.client.delete_collection(COLLECTION)
-        except:
-            pass
+        # Simple lightweight embedder (NO TORCH)
+        self.vectorizer = TfidfVectorizer(max_features=384)
 
-        self._init_collection()
-        self._index_all()
-        print("✅ RAG Engine Loaded Successfully")
+        # Load all CSV text for vectorizer
+        all_text = self._load_all_text()
+        self.vectorizer.fit(all_text)
 
-    # --------------------------------------------------------
-    def _init_collection(self):
+        # Rebuild collection ALWAYS (safe)
         self.client.recreate_collection(
             collection_name=COLLECTION,
-            vectors_config=models.VectorParams(
-                size=VECTOR_DIM,
-                distance=models.Distance.COSINE
-            )
+            vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE)
         )
-        print("📦 New Qdrant collection created.")
 
-    # --------------------------------------------------------
+        # Index data
+        self._index_file("data/hotels.csv", "Hotel")
+        self._index_file("data/activities.csv", "Activity")
+        self._index_file("data/places.csv", "Place")
+
+
+    # -------------------------------------------------------------
+    def _load_all_text(self):
+        texts = []
+        for f in ["hotels.csv", "activities.csv", "places.csv"]:
+            path = os.path.join(DATA_DIR, f)
+            if not os.path.exists(path):
+                continue
+            df = pd.read_csv(path)
+            for _, r in df.iterrows():
+                t = f"{r.get('name','')} {r.get('location','')} {r.get('description','')}"
+                texts.append(t)
+        return texts
+
+
+    # -------------------------------------------------------------
+    def _embed(self, text):
+        try:
+            vec = self.vectorizer.transform([text]).toarray()[0]
+            # pad if <384
+            if len(vec) < 384:
+                vec = list(vec) + [0.0] * (384 - len(vec))
+            return vec
+        except:
+            return [0.0] * 384
+
+
+    # -------------------------------------------------------------
     def _index_file(self, file_path, data_type):
         if not os.path.exists(file_path):
-            logger.warning(f"⚠️ Missing file: {file_path}")
             return
 
         df = pd.read_csv(file_path)
@@ -79,73 +73,37 @@ class RAGEngine:
             payload["data_type"] = data_type
             payload["eco_score"] = float(payload.get("eco_score", 0))
 
-            text = (
-                f"{payload.get('name','')} "
-                f"{payload.get('location','')} "
-                f"{payload.get('description','')} "
-                f"{data_type}"
-            )
+            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')}"
+            vec = self._embed(text)
 
-            vec = self.embedder.encode(text)  # ALWAYS 32-d
-
-            points.append(
-                models.PointStruct(
-                    id=str(uuid4()),
-                    vector=vec,
-                    payload=payload
-                )
-            )
+            points.append(models.PointStruct(
+                id=str(uuid4()),
+                vector=vec,
+                payload=payload
+            ))
 
         if points:
             self.client.upsert(collection_name=COLLECTION, points=points)
-            print(f"📥 Indexed {len(points)} items → {data_type}")
 
-    # --------------------------------------------------------
-    def _index_all(self):
-        print("📚 Indexing all CSV files...")
-        self._index_file(CSV_HOTELS, "Hotel")
-        self._index_file(CSV_ACTIVITIES, "Activity")
-        self._index_file(CSV_PLACES, "Place")
-        print("✅ Indexing complete!")
 
-    # --------------------------------------------------------
+    # -------------------------------------------------------------
     def search(self, query, top_k=10, min_eco_score=7.0):
 
-        # Convert query → vector
-        qvec = self.embedder.encode(query)
+        qvec = self._embed(query)
 
-        def do_search(score):
-            try:
-                return self.client.search(
-                    collection_name=COLLECTION,
-                    query_vector=qvec,
-                    query_filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="eco_score",
-                                range=models.Range(gte=score)
-                            )
-                        ]
-                    ),
-                    limit=top_k
-                )
-            except Exception as e:
-                logger.error(f"Qdrant search error: {e}")
-                return []
-
-        # Try strict eco filter
-        results = do_search(min_eco_score)
-
-        # If none found → lower eco score
-        if not results:
-            print("⚠️ Lowering eco score to 7.0")
-            results = do_search(7.0)
-
-        # If STILL empty → return top hotels manually
-        if not results:
-            print("⚠️ Still empty → manual fallback results")
-            df = pd.read_csv(CSV_HOTELS)
-            df = df.sort_values("eco_score", ascending=False)
-            return df.head(5).to_dict(orient="records")
+        results = self.client.search(
+            collection_name=COLLECTION,
+            query_vector=qvec,
+            query_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="eco_score",
+                        range=models.Range(gte=min_eco_score)
+                    )
+                ]
+            ),
+            limit=top_k,
+            with_payload=True
+        )
 
         return [hit.payload for hit in results]
