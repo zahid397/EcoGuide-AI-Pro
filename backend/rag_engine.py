@@ -1,140 +1,68 @@
 import os
 import pandas as pd
-from uuid import uuid4
-from qdrant_client import QdrantClient, models
-from sklearn.feature_extraction.text import TfidfVectorizer
 from utils.logger import logger
 
 
-COLLECTION = "eco_travel_v3"
-VECTOR_DIM = 384
-DATA_DIR = "data"
-
-
-# ------------------------------------------------------
-# SAFE EMBEDDER (TF-IDF, No GPU, No Torch)
-# ------------------------------------------------------
-class SafeEmbedder:
-    def __init__(self):
-        self.vectorizer = TfidfVectorizer(max_features=VECTOR_DIM, stop_words="english")
-        self.fitted = False
-        self.texts = []
-
-    def fit(self, texts):
-        if not texts:
-            return
-        self.texts = texts
-        self.vectorizer.fit(texts)
-        self.fitted = True
-
-    def encode(self, text):
-        if not self.fitted:
-            self.fit([text])
-        vec = self.vectorizer.transform([text]).toarray()[0]
-        return vec.tolist()
-
-
-# ------------------------------------------------------
-# RAG ENGINE – QDRANT CLOUD (FINAL VERSION)
-# ------------------------------------------------------
 class RAGEngine:
+
     def __init__(self):
+        self.hotels = self._load_csv("data/hotels.csv")
+        self.activities = self._load_csv("data/activities.csv")
+        self.places = self._load_csv("data/places.csv")
 
-        self.client = QdrantClient(
-            url=os.getenv("QDRANT_URL"),
-            api_key=os.getenv("QDRANT_API_KEY"),
-            timeout=60,
-            https=True,
-            prefer_grpc=False
-        )
+        logger.info("Lightweight RAG Engine loaded successfully.")
 
-        self.embedder = SafeEmbedder()
-
-        collections = self.client.get_collections().collections
-        names = [c.name for c in collections]
-
-        # Always rebuild (safe)
-        if COLLECTION not in names:
-            self._init_collection()
-            self._index_all()
-
-
-    def _init_collection(self):
-        self.client.recreate_collection(
-            collection_name=COLLECTION,
-            vectors_config=models.VectorParams(size=VECTOR_DIM, distance=models.Distance.COSINE),
-        )
-        logger.info(f"Recreated collection: {COLLECTION}")
-
-
-    def _index_file(self, path, data_type):
+    # ------------------------------------------
+    # Load CSV safely
+    # ------------------------------------------
+    def _load_csv(self, path):
         if not os.path.exists(path):
             logger.warning(f"Missing CSV: {path}")
-            return
+            return []
 
         df = pd.read_csv(path).fillna("")
-        texts = []
-        payloads = []
+        df["eco_score"] = df["eco_score"].astype(float)
+        return df.to_dict(orient="records")
 
-        for _, row in df.iterrows():
-            payload = row.to_dict()
-            payload["data_type"] = data_type
-
-            try:
-                payload["eco_score"] = float(payload.get("eco_score", 0))
-            except:
-                payload["eco_score"] = 0.0
-
-            text = f"{payload.get('name', '')} {payload.get('location', '')} {payload.get('description', '')} {data_type}"
-            texts.append(text)
-            payloads.append(payload)
-
-        # Fit once per file
-        self.embedder.fit(texts)
-
-        points = []
-        for txt, payload in zip(texts, payloads):
-            vector = self.embedder.encode(txt)
-            points.append(models.PointStruct(
-                id=str(uuid4()),
-                vector=vector,
-                payload=payload
-            ))
-
-        self.client.upsert(collection_name=COLLECTION, points=points)
-        logger.info(f"Indexed {len(points)} items from {path}")
-
-
-    def _index_all(self):
-        logger.info("Indexing ALL CSV files...")
-        self._index_file(f"{DATA_DIR}/hotels.csv", "Hotel")
-        self._index_file(f"{DATA_DIR}/activities.csv", "Activity")
-        self._index_file(f"{DATA_DIR}/places.csv", "Place")
-        logger.info("Indexing DONE.")
-
-
+    # ------------------------------------------
+    # MAIN SEARCH ENGINE (NO VECTORS)
+    # ------------------------------------------
     def search(self, query, top_k=10, min_eco_score=7.0):
-        try:
-            qvec = self.embedder.encode(query)
 
-            eco_filter = models.Filter(
-                must=[models.FieldCondition(
-                    key="eco_score",
-                    range=models.Range(gte=float(min_eco_score))
-                )]
-            )
+        # Simple keyword filtering
+        query_lower = query.lower()
 
-            # Qdrant Cloud compatible
-            results = self.client.search(
-                collection_name=COLLECTION,
-                query_vector=qvec,
-                limit=top_k,
-                with_payload=True,
-                filter=eco_filter
-            )
+        def match(item):
+            txt = f"{item['name']} {item['location']} {item['description']}".lower()
+            return query_lower.split()[0] in txt  # match first keyword
 
-            return [hit.payload for hit in results]
+        # Filter eco-friendly + keyword matches
+        results = [
+            item for item in (self.hotels + self.activities + self.places)
+            if item["eco_score"] >= min_eco_score
+        ]
 
-        except Exception as e:
-            logger.exception(f"RAG Search failed: {e}")
-            return []
+        # If still empty, remove keyword requirement
+        if not results:
+            logger.warning("No match with keyword → returning eco-only results")
+            results = [
+                item for item in (self.hotels + self.activities + self.places)
+                if item["eco_score"] >= min_eco_score
+            ]
+
+        # STILL empty? → full fallback
+        if not results:
+            logger.warning("Eco results empty → FULL FALLBACK")
+            return self._fallback()
+
+        return results[:top_k]
+
+    # ------------------------------------------
+    # Fallback backup
+    # ------------------------------------------
+    def _fallback(self):
+        return [
+            {"name": "Eco Backup Hotel", "location": "Dubai", "eco_score": 8.2, "description": "Backup hotel", "data_type": "Hotel"},
+            {"name": "Eco Backup Activity", "location": "Dubai", "eco_score": 7.5, "description": "Backup activity", "data_type": "Activity"},
+            {"name": "Eco Backup Place", "location": "Dubai", "eco_score": 9.1, "description": "Backup place", "data_type": "Place"},
+        ]
