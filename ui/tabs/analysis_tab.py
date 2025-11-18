@@ -1,7 +1,11 @@
 import streamlit as st
 
-def render(itinerary: dict):
-    """Renders the Analysis tab safely."""
+def render_analysis(itinerary: dict):
+    """Renders the Analysis tab safely without throwing UI errors."""
+
+    if not isinstance(itinerary, dict):
+        st.error("Invalid itinerary data.")
+        return
 
     st.subheader("🔬 Trip Analysis")
 
@@ -10,7 +14,7 @@ def render(itinerary: dict):
 
     st.write(f"**Carbon Saved:** {itinerary.get('carbon_saved', '0kg')}")
     st.write(f"**Waste-Free Score:** {itinerary.get('waste_free_score', 0)}/10")
-    st.write(f"**Risk & Safety Report:** {itinerary.get('risk_safety_report', 'No data')}")
+    st.write(f"**Risk & Safety Report:** {itinerary.get('risk_safety_report', 'No data available')}")
 
     st.divider()
 
@@ -32,6 +36,6 @@ def render(itinerary: dict):
 
     st.divider()
 
-    # Duplicate Trip Detector
+    # --- Duplicate Trip Detector ---
     st.write("### 🔁 Duplicate Trip Check")
     st.write(itinerary.get("duplicate_trip_detector", "Unique trip"))
