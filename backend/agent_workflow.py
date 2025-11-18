@@ -6,23 +6,17 @@ from utils.logger import logger
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-# ============================
-# UNIVERSAL FALLBACK
-# ============================
 def fallback_itinerary():
     return {
-        "summary": "Fallback itinerary (AI issue).",
-        "hotel": {"name": "Fallback Eco Hotel", "location": "Dubai"},
+        "summary": "Fallback itinerary.",
+        "hotel": {"name": "Fallback Hotel"},
         "activities": [{"title": "Fallback Activity"}],
-        "daily_plan": [{"day": 1, "plan": "Relax and fallback"}],
+        "daily_plan": [{"day": 1, "plan": "Relax"}],
         "eco_score": 8.0,
         "carbon_saved": "5kg"
     }
 
 
-# ============================
-# FULL AGENT WORKFLOW
-# ============================
 class AgentWorkflow:
     def __init__(self):
         self.model = genai.GenerativeModel(
@@ -30,17 +24,20 @@ class AgentWorkflow:
             generation_config={"response_mime_type": "application/json"}
         )
 
-    # =====================================================
+    # =========================================================
     # MAIN TRIP GENERATOR
-    # =====================================================
-    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
+    # =========================================================
+    def run(
+        self, query, rag_data, budget, interests, days, location,
+        travelers, user_profile, priorities
+    ):
         try:
             prompt = {
                 "query": query,
                 "budget": budget,
                 "days": days,
-                "travelers": travelers,
                 "location": location,
+                "travelers": travelers,
                 "interests": interests,
                 "priorities": priorities,
                 "user_profile": user_profile,
@@ -55,114 +52,98 @@ class AgentWorkflow:
             except:
                 pass
 
-            try:
-                parsed = extract_json(response.text)
-                if parsed:
-                    return parsed
-            except:
-                pass
-
-            return fallback_itinerary()
-
-        except Exception as e:
-            logger.exception(e)
-            return fallback_itinerary()
-
-    # =====================================================
-    # PLAN REFINER
-    # =====================================================
-    def refine_plan(self, itinerary, instruction):
-        try:
-            prompt = [
-                {"role": "system", "content": "Refine this itinerary strictly in JSON."},
-                {"role": "user", "content": f"ITINERARY:\n{itinerary}\n\nREFINEMENT:\n{instruction}"}
-            ]
-
-            response = self.model.generate_content(prompt)
-
             parsed = extract_json(response.text)
             if parsed:
                 return parsed
 
-            return itinerary
-        except:
-            return itinerary
+        except Exception as e:
+            logger.exception(e)
 
-    # =====================================================
-    # STORY GENERATOR (FIXED)
-    # =====================================================
-    def generate_story(self, itinerary, user_name):
-        prompt = f"""
-        Write a fun travel story for {user_name} based on this itinerary.
-        Return JSON only: {{"story": "..."}}
-        """
+        return fallback_itinerary()
 
+    # =========================================================
+    # FIXED: REFINER (UI calls this correctly)
+    # =========================================================
+    def refine_plan(self, plan_context, refinement_query):
+        """UI passes: plan_context + user text"""
         try:
+            prompt = f"""
+            Improve this itinerary based on user request.
+            ITINERARY: {plan_context}
+            REQUEST: {refinement_query}
+            Return JSON only.
+            """
+
             resp = self.model.generate_content(prompt)
             data = extract_json(resp.text)
             if data:
-                return data.get("story", "")
+                return data
+
         except:
             pass
 
-        return "Could not generate story."
+        return plan_context
 
-    # =====================================================
-    # PACKING LIST GENERATOR (FIXED)
-    # =====================================================
-    def generate_packing_list(self, itinerary, user_name):
+    # =========================================================
+    # FIXED: STORY GENERATOR (UI passes plan_context)
+    # =========================================================
+    def generate_story(self, plan_context):
         prompt = f"""
-        Create a packing list for {user_name} based on this itinerary.
-        Return JSON: {{"items": ["item1","item2"]}}
+        Write a fun travel story based on this itinerary.
+        Return JSON: {{"story": "..."}}
+        ITINERARY: {plan_context}
         """
-
         try:
             resp = self.model.generate_content(prompt)
-            parsed = extract_json(resp.text)
-            if parsed:
-                return parsed.get("items", [])
+            data = extract_json(resp.text)
+            return data.get("story", "")
         except:
-            pass
+            return "Could not generate story."
 
-        return ["Passport", "Water bottle", "Eco-friendly bag"]
-
-    # =====================================================
-    # CHATBOT QUESTION HANDLER (FIXED)
-    # =====================================================
-    def ask_question(self, question, itinerary):
+    # =========================================================
+    # FIXED: PACKING LIST GENERATOR (UI passes plan_context)
+    # =========================================================
+    def generate_packing_list(self, plan_context):
         prompt = f"""
-        User question: {question}
-        Context itinerary: {itinerary}
-        Answer nicely in JSON:
-        {{"answer": "..."}} 
+        Create a packing list for this trip.
+        Return JSON: {{"items": ["..."]}}
+        ITINERARY: {plan_context}
         """
-
         try:
             resp = self.model.generate_content(prompt)
-            parsed = extract_json(resp.text)
-            if parsed:
-                return parsed.get("answer", "")
+            data = extract_json(resp.text)
+            return data.get("items", [])
         except:
-            pass
+            return ["Passport", "Eco bag", "Water bottle"]
 
-        return "Sorry, I couldn't answer that."
+    # =========================================================
+    # FIXED: CHATBOT (UI passes plan_context + question)
+    # =========================================================
+    def ask_question(self, question, plan_context):
+        prompt = f"""
+        User asked: {question}
+        Use this itinerary as context: {plan_context}
+        Answer in JSON: {{"answer": "..."}}
+        """
+        try:
+            resp = self.model.generate_content(prompt)
+            data = extract_json(resp.text)
+            return data.get("answer", "")
+        except:
+            return "Sorry, I couldn't answer that."
 
-    # =====================================================
-    # UPGRADE SUGGESTIONS (FIXED)
-    # =====================================================
+    # =========================================================
+    # FIXED: UPGRADE SUGGESTIONS
+    # =========================================================
     def get_upgrade_suggestions(self, plan_context):
         prompt = f"""
-        Suggest 3 improvements for this trip plan.
-        Return JSON: {{"upgrades": ["A","B","C"]}}
+        Suggest 3 improvements.
+        Return JSON: {{"upgrades": ["..."]}}
         PLAN: {plan_context}
         """
-
         try:
             resp = self.model.generate_content(prompt)
-            parsed = extract_json(resp.text)
-            if parsed:
-                return parsed.get("upgrades", [])
+            data = extract_json(resp.text)
+            return data.get("upgrades", [])
         except:
-            pass
-
-        return ["Add more eco attractions", "Improve transport", "Add nightlife options"]
+            return ["Add more eco spots", "Improve food choices", "Extend beach time"]
