@@ -3,53 +3,48 @@ from utils.profile import load_profile
 from utils.logger import logger
 import json
 
-def render_packing(agent, itinerary: dict, user_name: str):
-    """Renders the Packing List tab safely."""
-    
+def render_packing_tab(agent, itinerary, user_name):
     st.subheader("🎒 AI-Generated Packing List")
-
-    # Choose list type
+    
+    # 1. List Type Selection
     list_type = st.radio(
-        "Packing Style:",
-        ["Smart", "Minimal", "Ultra-Light"],
-        horizontal=True
+        "Select List Type:",
+        ("Smart List", "Minimal List", "Ultra-Light List"),
+        horizontal=True, 
+        key="packing_list_radio"  # Unique key to prevent errors
     )
+    
+    try:
+        # 2. Check if we need to generate it
+        # Ensure session_state.packing_list is a dictionary
+        if not isinstance(st.session_state.packing_list, dict):
+            st.session_state.packing_list = {}
 
-    # Load user profile (safe)
-    user_profile = load_profile(user_name)
-    if not user_profile:
-        user_profile = {"name": user_name}
-
-    # Session cache init
-    if "packing_cache" not in st.session_state:
-        st.session_state.packing_cache = {}
-
-    cache_key = f"{list_type}_{user_name}"
-
-    # Already generated?
-    if cache_key in st.session_state.packing_cache:
-        st.markdown(st.session_state.packing_cache[cache_key])
-        return
-
-    # Generate
-    if st.button("✨ Generate Packing List"):
-        try:
-            with st.spinner("Preparing your packing list..."):
-                output = agent.generate_packing_list(
-                    plan_context=json.dumps(itinerary),
+        if list_type not in st.session_state.packing_list:
+            with st.spinner(f"Generating your '{list_type}'..."):
+                # Load User Data
+                user_profile = load_profile(user_name)
+                
+                # Convert Plan to Text for AI
+                plan_context = json.dumps(itinerary, default=str)
+                
+                # Call AI Agent
+                packing_list_md = agent.generate_packing_list(
+                    plan_context=plan_context,
                     user_profile=user_profile,
                     list_type=list_type
                 )
+                
+                # Save to Cache
+                st.session_state.packing_list[list_type] = packing_list_md
+                
+        # 3. Display Result
+        if list_type in st.session_state.packing_list:
+            st.markdown(st.session_state.packing_list[list_type])
+        else:
+            st.warning("Click 'Generate Plan' first to see packing items.")
 
-                # Save to session
-                st.session_state.packing_cache[cache_key] = output
-
-                st.markdown(output)
-
-        except Exception as e:
-            logger.exception(f"Packing list error: {e}")
-            st.error("⚠️ Could not generate packing list.")
-
-# ⭐⭐⭐ FIX: This alias makes UI call work ⭐⭐⭐
-def render_packing_tab(agent, itinerary, user_name):
-    return render_packing(agent, itinerary, user_name)
+    except Exception as e:
+        logger.exception(f"Failed to generate packing list: {e}")
+        st.error(f"Could not generate packing list. Error: {e}")
+        
