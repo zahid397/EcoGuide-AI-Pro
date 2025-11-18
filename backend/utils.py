@@ -1,47 +1,41 @@
 import json
 import re
-from typing import Optional, Any, Dict
+from utils.logger import logger
 
 
-def extract_json(text: str) -> Optional[Dict[str, Any]]:
+def extract_json(text: str):
     """
-    Extracts the first valid JSON object found inside LLM output.
-    Works even if model sends text+json mixed content.
+    Extract JSON from a model response safely.
+    Supports:
+    - Raw JSON
+    - JSON inside backticks (```json ... ```)
+    - Messy text with JSON inside
     """
+
     if not text:
         return None
 
+    # Try strict JSON first
     try:
-        # Find first {...} block
-        match = re.search(r"\{[\s\S]*\}", text)
-        if not match:
-            return None
+        return json.loads(text)
+    except:
+        pass
 
-        json_block = match.group(0)
-        return json.loads(json_block)
-
-    except json.JSONDecodeError:
-        repaired = clean_json(json_block)
+    # Extract inside ```json ... ```
+    code_block = re.findall(r"```json(.*?)```", text, re.DOTALL)
+    if code_block:
         try:
-            return json.loads(repaired)
-        except Exception:
-            return None
-    except Exception:
-        return None
+            return json.loads(code_block[0].strip())
+        except Exception as e:
+            logger.error(f"Failed to parse JSON block → {e}")
 
+    # Extract first {...}
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except Exception as e:
+            logger.error(f"Regex JSON parse failed → {e}")
 
-def clean_json(data: str) -> str:
-    """Fixes common JSON issues from LLM output."""
-    if not data:
-        return data
-
-    # Remove trailing commas
-    data = re.sub(r",\s*([\]}])", r"\1", data)
-
-    # Smart quotes → normal quotes
-    data = data.replace("“", '"').replace("”", '"')
-
-    # Remove weird zero-width chars
-    data = re.sub(r"[\u200b-\u200f]", "", data)
-
-    return data
+    logger.error("extract_json: No valid JSON found")
+    return None
