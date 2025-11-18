@@ -1,5 +1,4 @@
 import streamlit as st
-from typing import Dict, Any
 from utils.cost import calculate_real_cost
 from utils.cards import get_card_css
 from utils.logger import logger
@@ -7,23 +6,24 @@ from ui.tabs import (
     overview_tab, analysis_tab, plan_tab, list_tab,
     packing_tab, story_tab, map_tab, chat_tab, share_tab
 )
+from backend.agent_workflow import AgentWorkflow
+from backend.rag_engine import RAGEngine
 
-def render_main_content(agent, rag):
-    """Renders the main content area."""
 
-    # ---------------------------------------------------
-    # If itinerary is missing
-    # ---------------------------------------------------
+def render_main_content(agent: AgentWorkflow, rag: RAGEngine) -> None:
+    """Render the main content area."""
+
+    # -------------------------------
+    # No itinerary yet
+    # -------------------------------
     if not st.session_state.itinerary:
-        st.info("Please fill in your trip details in the sidebar and click 'Generate Plan 🚀'.")
+        st.info("Please fill in your trip details in the sidebar and click **Generate Plan 🚀**.")
         return
 
-    # ---------------------------------------------------
-    # Load itinerary & session parameters
-    # ---------------------------------------------------
     itinerary = st.session_state.itinerary
     st.markdown(get_card_css(), unsafe_allow_html=True)
 
+    # Restore saved trip state
     days = st.session_state.get("current_trip_days", 3)
     travelers = st.session_state.get("current_trip_travelers", 1)
     budget = st.session_state.get("current_trip_budget", 1000)
@@ -32,107 +32,110 @@ def render_main_content(agent, rag):
     priorities = st.session_state.get("current_trip_priorities", {})
     user_name = st.session_state.get("user_name", "Traveler")
 
-    # Cost calculation
-    real_cost = calculate_real_cost(
-        itinerary.get("activities", []),
-        days,
-        travelers
-    )
+    # -------------------------------
+    # Metrics section
+    # -------------------------------
+    real_cost = calculate_real_cost(itinerary.get("activities", []), days, travelers)
 
-    st.subheader(f"🚀 {user_name}'s Custom Eco-Tour: {location}")
+    st.subheader(f"🚀 {user_name}'s Eco Trip — {location}")
 
-    # ---------------------------------------------------
-    # Metrics
-    # ---------------------------------------------------
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total Cost (Calculated)", f"${real_cost}")
-    col2.metric("Avg Eco Score", f"{itinerary.get('eco_score', 0)} / 10")
+    col1.metric("Total Cost", f"${real_cost}")
+    col2.metric("Avg Eco Score", f"{itinerary.get('eco_score', 0)}/10")
     col3.metric("Carbon Saved", f"{itinerary.get('carbon_saved', '0kg')}")
 
-    # ---------------------------------------------------
-    # Tabs
-    # ---------------------------------------------------
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
-        "✨ Overview", "🔬 AI Analysis", "📅 Detailed Plan", "🏄 Activities",
-        "🎒 Packing", "📖 Story", "🗺️ Map", "🤖 Chat", "🔗 Share"
+    # -------------------------------
+    # TABS
+    # -------------------------------
+    (
+        tab_overview,
+        tab_analysis,
+        tab_plan,
+        tab_list,
+        tab_pack,
+        tab_story,
+        tab_map,
+        tab_chat,
+        tab_share
+    ) = st.tabs([
+        "✨ Overview", "🔬 AI Analysis", "📅 Detailed Plan", "🏄‍♂️ Activities",
+        "🎒 Packing List", "📖 Story", "🗺️ Map", "🤖 Chat", "🔗 Share"
     ])
 
-    with tab1:
+    with tab_overview:
         overview_tab.render_overview(itinerary, budget, travelers)
 
-    with tab2:
+    with tab_analysis:
         analysis_tab.render_analysis(itinerary)
 
-    with tab3:
+    with tab_plan:
         plan_tab.render_plan(itinerary, location, user_name)
 
-    with tab4:
+    with tab_list:
         list_tab.render_list(itinerary)
 
-    with tab5:
+    with tab_pack:
         packing_tab.render_packing_tab(agent, itinerary, user_name)
 
-    with tab6:
+    with tab_story:
         story_tab.render_story_tab(agent, itinerary, user_name)
 
-    with tab7:
+    with tab_map:
         map_tab.render_map_tab(location)
 
-    with tab8:
+    with tab_chat:
         chat_tab.render_chat_tab(agent, itinerary)
 
-    with tab9:
+    with tab_share:
         share_tab.render_share_tab(days, location, interests, budget)
 
-    # ---------------------------------------------------
-    # Refinement Section
-    # ---------------------------------------------------
+    # ----------------------------------------------------
+    #  🤖 Refine Section (FINAL FIXED)
+    # ----------------------------------------------------
     st.divider()
     st.subheader("🤖 Refine Your Plan")
 
     refinement_query = st.text_input(
         "What would you like to change?",
         key="refine_input",
-        placeholder="e.g., Make it cheaper or Add more beach activities"
+        placeholder="e.g., Make it cheaper, Add more beaches..."
     )
 
-    st.markdown("##### Quick Suggestions")
-    c1, c2, c3, c4, c5 = st.columns(5)
+    # Quick buttons
+    col1, col2, col3, col4 = st.columns(4)
 
-    if c1.button("💰 Cheaper"):
-        refinement_query = "Make the trip cheaper with budget friendly alternatives."
+    if col1.button("💰 Cheaper", use_container_width=True):
+        st.session_state.refine_input = "Make the trip cheaper."
+        refinement_query = st.session_state.refine_input
 
-    if c2.button("🎉 More Fun"):
-        refinement_query = "Add more fun and exciting activities."
+    if col2.button("🎉 More Fun", use_container_width=True):
+        st.session_state.refine_input = "Add more fun, exciting activities."
+        refinement_query = st.session_state.refine_input
 
-    if c3.button("😌 Relaxing"):
-        refinement_query = "Add more relaxing experiences."
+    if col3.button("🌿 More Eco", use_container_width=True):
+        st.session_state.refine_input = "Increase eco-friendly activities and hotels."
+        refinement_query = st.session_state.refine_input
 
-    if c4.button("🌿 More Eco"):
-        refinement_query = "Increase eco-friendly choices."
+    if col4.button("😌 More Relaxed", use_container_width=True):
+        st.session_state.refine_input = "Make the trip more relaxing."
+        refinement_query = st.session_state.refine_input
 
-    if c5.button("🧒 Family Friendly"):
-        refinement_query = "Make the plan more suitable for families."
-
-    if st.button("🔁 Apply Refinement", use_container_width=True):
-
+    # -------------------------------
+    # UPDATE PLAN BUTTON
+    # -------------------------------
+    if st.button("🔁 Update Plan", use_container_width=True):
         if not refinement_query.strip():
-            st.warning("Please type what you want to refine.")
+            st.warning("Please type a refinement request first.")
             return
 
-        with st.spinner("Updating your plan..."):
+        with st.spinner("Updating your itinerary..."):
             try:
-                refined = agent.refine_plan(
+                new_plan = agent.refine_plan(
                     itinerary=itinerary,
                     refinement_query=refinement_query
                 )
-
-                if refined:
-                    st.session_state.itinerary = refined
-                    st.success("Your plan has been updated!")
-                else:
-                    st.error("Could not refine plan.")
-
+                st.session_state.itinerary = new_plan
+                st.success("Your itinerary has been updated! 🎉")
             except Exception as e:
                 logger.exception(e)
                 st.error("Failed to refine plan.")
