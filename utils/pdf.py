@@ -14,13 +14,13 @@ def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
         pdf.cell(0, 10, "Detailed Itinerary", 0, 1, 'L')
         pdf.set_font("Arial", '', 11)
         
-        # --- PDF Fix: Handle Text Encoding ---
-        raw_plan = itinerary_data.get('plan', 'No detailed plan available.')
+        # --- CRITICAL FIX: Handle Text Encoding ---
+        raw_plan = str(itinerary_data.get('plan', 'No detailed plan available.'))
         
-        # Step 1: Remove Markdown
+        # Step 1: Remove Markdown symbols
         plan_text = raw_plan.replace('### ', '').replace('## ', '').replace('* ', '- ')
         
-        # Step 2: Encode to Latin-1 to remove Emojis/Unknown chars (Fixes Crash)
+        # Step 2: Convert to Latin-1 (Remove Emojis/Bangla to prevent crash)
         plan_text = plan_text.encode('latin-1', 'replace').decode('latin-1')
         
         pdf.multi_cell(0, 5, plan_text)
@@ -33,14 +33,14 @@ def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
         activities = itinerary_data.get('activities', [])
         if activities:
             for item in activities:
-                name = item.get('name', 'Unknown').encode('latin-1', 'replace').decode('latin-1')
-                dtype = item.get('data_type', 'Activity')
-                eco = item.get('eco_score', 'N/A')
+                name = str(item.get('name', 'Unknown')).encode('latin-1', 'replace').decode('latin-1')
+                dtype = str(item.get('data_type', 'Activity'))
+                eco = str(item.get('eco_score', 'N/A'))
                 
                 item_text = f"- {name} ({dtype}) | Eco: {eco}"
                 pdf.multi_cell(0, 5, item_text)
         
-        # Budget Breakdown
+        # Budget Section
         pdf.ln(5)
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(0, 10, "Budget Breakdown", 0, 1, 'L')
@@ -61,4 +61,4 @@ def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
     except Exception as e:
         logger.exception(f"Failed to generate PDF: {e}")
         return None
-      
+        
