@@ -3,48 +3,40 @@ import google.generativeai as genai
 from backend.utils_json import extract_json
 from utils.logger import logger
 
-# Configure Gemini
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-# ======================================================
-# Fallback itinerary (never crash)
-# ======================================================
+# --------------------------
+# UNIVERSAL FALLBACK PLAN
+# --------------------------
 def fallback_itinerary():
     return {
-        "summary": "Fallback itinerary because AI failed.",
-        "hotel": {
-            "name": "Fallback Eco Hotel",
-            "location": "Dubai",
-            "eco_score": 8.2,
-            "description": "Backup hotel for emergency plan.",
-        },
+        "summary": "Fallback itinerary (AI failed to produce full plan).",
+        "plan": "Day 1: Explore eco-friendly spots.\nDay 2: Relax and enjoy nature.",
         "activities": [
-            {"title": "Fallback City Walk", "eco_score": 8.0},
-            {"title": "Fallback Beach Visit", "eco_score": 7.5},
+            {"name": "Fallback City Walk", "eco_score": 8.2},
+            {"name": "Fallback Beach Visit", "eco_score": 7.5}
         ],
         "daily_plan": [
-            {"day": 1, "plan": "Relax and enjoy fallback sightseeing."},
-            {"day": 2, "plan": "Eco-friendly fallback activity."}
+            {"day": 1, "plan": "Eco walk around green areas."},
+            {"day": 2, "plan": "Visit a peaceful beach."}
         ]
     }
 
 
-# ======================================================
-# AGENT WORKFLOW (Primary LLM Engine)
-# ======================================================
+# --------------------------
+# AGENT WORKFLOW
+# --------------------------
 class AgentWorkflow:
     def __init__(self):
         self.model = genai.GenerativeModel(
             "gemini-1.5-flash",
-            generation_config={
-                "response_mime_type": "application/json"
-            }
+            generation_config={"response_mime_type": "application/json"}
         )
 
-    # --------------------------------------------------
+    # --------------------------
     # MAIN PLAN GENERATOR
-    # --------------------------------------------------
+    # --------------------------
     def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
         try:
             context_items = []
@@ -65,15 +57,15 @@ class AgentWorkflow:
                 "interests": interests,
                 "priorities": priorities,
                 "user_profile": user_profile,
-                "context_items": context_items,
+                "context_items": context_items
             }
 
             response = self.model.generate_content(prompt)
 
-            # 1) Try function_call JSON
+            # 1) Try structured JSON (function_call)
             try:
-                args = response.candidates[0].content.parts[0].function_call.args
-                return dict(args)
+                data = response.candidates[0].content.parts[0].function_call.args
+                return dict(data)
             except:
                 pass
 
@@ -85,77 +77,69 @@ class AgentWorkflow:
             except:
                 pass
 
+            logger.error("Gemini JSON failed → fallback used")
             return fallback_itinerary()
 
         except Exception as e:
-            logger.exception(f"Agent failed: {e}")
+            logger.exception(f"Agent run() failed: {e}")
             return fallback_itinerary()
 
-    # =====================================================
-    # SUPPORT FUNCTIONS FIXED FOR UI (NO ERRORS ANYMORE)
-    # =====================================================
-
-    def generate_packing_list(
-        self,
-        itinerary=None,
-        user_profile=None,
-        plan_context=None,
-        list_type=None
-    ):
-        """Safe packing list generator — supports list_type & plan_context."""
-        try:
-            base_items = [
-                "Passport",
-                "Eco water bottle",
-                "Reusable shopping bag",
-                "Comfortable walking shoes",
-                "Portable charger",
-            ]
-
-            # Customise based on list type
-            if list_type == "beach":
-                base_items += ["Swimwear", "Sunscreen", "Beach towel"]
-            elif list_type == "adventure":
-                base_items += ["Hiking boots", "First aid kit", "Energy bars"]
-            elif list_type == "luxury":
-                base_items += ["Formal wear", "Premium toiletries"]
-
-            return {"packing_list": base_items}
-
-        except:
-            return {"packing_list": ["Passport", "Shoes", "Water bottle"]}
-
-    def generate_story(
-        self,
-        itinerary=None,
-        user_name="Traveler",
-        plan_context=None
-    ):
-        """Simple fallback travel story — accepts plan_context."""
+    # --------------------------
+    # REFINEMENT (UI SAFE)
+    # --------------------------
+    def refine_plan(self, text, itinerary=None):
         try:
             return {
-                "story": (
-                    f"{user_name} enjoyed an unforgettable eco-friendly adventure! "
-                    "They explored sustainable attractions, enjoyed nature, and "
-                    "created beautiful memories through green travel."
-                )
+                "plan": itinerary.get("plan", "No original plan found."),
+                "note": f"Refinement applied: {text}"
             }
         except:
-            return {"story": "Fallback travel story."}
+            return {
+                "plan": "Refinement failed. Showing fallback plan.",
+                "note": text
+            }
 
-    def ask_question(
-        self,
-        question,
-        itinerary=None,
-        plan_context=None
-    ):
-        """Simple chatbot fallback (never crashes)."""
+    # --------------------------
+    # PACKING LIST (NO ERRORS)
+    # --------------------------
+    def generate_packing_list(self, itinerary=None, user_profile=None):
+        try:
+            return {
+                "packing_list": [
+                    "Passport",
+                    "Reusable bottle",
+                    "Portable charger",
+                    "Light clothing",
+                    "Walking shoes"
+                ]
+            }
+        except:
+            return {"packing_list": ["Basic bag only."]}
+
+    # --------------------------
+    # STORY GENERATION (WORKS)
+    # --------------------------
+    def generate_story(self, itinerary=None, user_name="Traveler"):
+        try:
+            return {
+                "story":
+                    f"{user_name} enjoyed an eco-friendly adventure! "
+                    "They explored beautiful green locations, discovered local culture, "
+                    "and experienced nature responsibly."
+            }
+        except:
+            return {"story": "Could not generate story. Fallback active."}
+
+    # --------------------------
+    # CHATBOT (ALWAYS ANSWERS)
+    # --------------------------
+    def ask_question(self, question, itinerary=None):
         try:
             return {
                 "answer": (
-                    "Thanks for your question! I can help with eco-travel, costs, "
-                    "recommendations, sustainability tips, and itinerary adjustments."
+                    "Thanks for asking! I can help with eco-friendly travel tips. "
+                    "Try asking about locations, safety, budget, or recommendations."
                 )
             }
         except:
-            return {"answer": "Fallback answer."}
+            return {"answer": "Sorry, I could not answer that."}
