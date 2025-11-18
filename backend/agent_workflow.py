@@ -1,237 +1,152 @@
 import os
-import json
 import google.generativeai as genai
 from dotenv import load_dotenv
 from backend.utils import extract_json
 from utils.schemas import ItinerarySchema
 from utils.logger import logger
-from pydantic import ValidationError
-from typing import Dict, Any, Optional, List
+import json
 
-# ================================
-# Gemini Setup (USE 2.5-FLASH)
-# ================================
 load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-1.5-flash")
 
-MODEL_NAME = "gemini-2.5-flash"   # ❤️ BEST MODEL
+# Default Fallback Prompt (Safe if text files are missing)
+DEFAULT_PROMPT = """
+You are an expert travel planner. Create a valid JSON itinerary based on the user request.
+Output ONLY JSON matching this schema:
+{
+    "plan": "Markdown plan...",
+    "activities": [],
+    "total_cost": 0,
+    "eco_score": 0,
+    "carbon_saved": "0kg",
+    "budget_breakdown": {},
+    "ai_time_planner_report": "Looks good",
+    "risk_safety_report": "Safe",
+    "cost_leakage_report": "None"
+}
+"""
 
-model = genai.GenerativeModel(
-    MODEL_NAME,
-    safety_settings=[
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-    ],
-    generation_config={
-        "temperature": 0.6,
-        "max_output_tokens": 8192,
-        "top_p": 0.95
-    }
-)
+def _load_prompt(filename):
+    """Loads prompt from file or returns default."""
+    try:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(base_path, "prompts", filename)
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except:
+        return DEFAULT_PROMPT
 
-# ================================
-# SAFE FALLBACK (NEVER FAILS)
-# ================================
-def fallback_itinerary():
-    return {
-        "plan": "## No plan generated.",
-        "activities": [],
-        "total_cost": 0,
-        "eco_score": 7,
-        "carbon_saved": "0kg",
-        "waste_free_score": 5,
-        "plan_health_score": 60,
-        "budget_breakdown": {},
-        "carbon_offset_suggestion": "",
-        "ai_image_prompt": "",
-        "ai_time_planner_report": "",
-        "cost_leakage_report": "",
-        "risk_safety_report": "",
-        "weather_contingency": "",
-        "duplicate_trip_detector": "",
-        "experience_highlights": [],
-        "trip_mood_indicator": {}
-    }
-
-# ================================
-# Agent Workflow
-# ================================
 class AgentWorkflow:
-
-    # ---------------------------------------
-    # Safe Gemini Caller (NEVER RETURNS NONE)
-    # ---------------------------------------
-    def _ask(self, prompt: str) -> str:
+    def _ask(self, prompt):
         try:
             response = model.generate_content(prompt)
-
-            # Primary
-            if hasattr(response, "text") and response.text:
-                return response.text
-
-            # Candidate fallback
-            if response.candidates:
-                parts = response.candidates[0].content.parts
-                if parts and hasattr(parts[0], "text"):
-                    return parts[0].text
-
-            logger.error("⚠ Gemini returned empty text.")
-            return "{}"
-
+            return response.text
         except Exception as e:
-            logger.error(f"⚠ Gemini API Error → {e}")
-            return "{}"
-
-    # ---------------------------------------
-    # Clean Output → Extract Only JSON
-    # ---------------------------------------
-    def _clean_output(self, text: str) -> str:
-        if not text:
-            return "{}"
-
-        text = text.replace("```json", "").replace("```", "").strip()
-        start = text.find("{")
-        end = text.rfind("}")
-
-        if start == -1 or end == -1:
-            return "{}"
-
-        return text[start: end+1]
-
-    # ---------------------------------------
-    # Validate JSON Using Schema
-    # ---------------------------------------
-    def _validate(self, raw: str):
-        try:
-            cleaned = self._clean_output(raw)
-
-            try:
-                data = json.loads(cleaned)
-            except:
-                data = extract_json(cleaned)
-
-            if not data:
-                raise ValueError("LLM returned empty JSON")
-
-            schema = ItinerarySchema(**data)
-            return schema.model_dump()
-
-        except Exception as e:
-            logger.error(f"⚠ JSON Validation Failed → {e}")
+            logger.exception(f"Gemini Error: {e}")
             return None
 
-    # ---------------------------------------
-    # RUN → Generate the Plan
-    # ---------------------------------------
-    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
+    def _validate(self, text):
+        try:
+            data = extract_json(text)
+            if not data: return ItinerarySchema().model_dump()
+            return ItinerarySchema(**data).model_dump()
+        except:
+            return ItinerarySchema().model_dump()
 
-        prompt = f"""
-You are an expert sustainable travel planner.
-Generate a full eco-friendly itinerary.
+    # ---------------------------------------------------------
+    # 1. MAIN RUN FUNCTION
+    # ---------------------------------------------------------
+    def run(self, query, rag_data, **kwargs):
+        """
+        Generates a new plan.
+        Using **kwargs allows this function to accept ANY arguments 
+        (like budget, days, travelers) without crashing.
+        """
+        try:
+            prompt_template = _load_prompt("itinerary_prompt.txt")
+            
+            # Prepare RAG data safely
+            rag_str = json.dumps(rag_data, default=str)
+            
+            # Basic replacements
+            prompt = prompt_template.replace("{query}", str(query))
+            prompt = prompt.replace("{rag_data}", rag_str)
+            
+            # Dynamic replacements for any other variables passed in kwargs
+            # (e.g., {budget}, {days}, {travelers}, {user_name})
+            for key, value in kwargs.items():
+                placeholder = "{" + key + "}"
+                # Only replace if the placeholder exists in the text file
+                if placeholder in prompt:
+                    prompt = prompt.replace(placeholder, str(value))
 
-User Query: {query}
-Days: {days}, Travelers: {travelers}, Budget: {budget}
-User Profile: {user_profile}
-Priorities: {priorities}
-RAG Data: {rag_data}
+            # Final Cleanup: Remove any leftover {placeholders} to avoid confusion
+            # (Optional step, but good for safety)
+            
+            return self._validate(self._ask(prompt))
+            
+        except Exception as e:
+            logger.exception(f"Run Workflow Failed: {e}")
+            # Fallback
+            fallback = f"{DEFAULT_PROMPT}\nUser Query: {query}\nData: {str(rag_data)[:1000]}"
+            return self._validate(self._ask(fallback))
 
-Return **VALID JSON ONLY** following EXACTLY this schema:
-{{
-  "plan": "Markdown plan...",
-  "activities": [],
-  "total_cost": 0,
-  "eco_score": 8,
-  "carbon_saved": "20kg",
-  "waste_free_score": 8,
-  "plan_health_score": 85,
-  "budget_breakdown": {{"Hotel": 500}},
-  "carbon_offset_suggestion": "",
-  "ai_image_prompt": "",
-  "ai_time_planner_report": "",
-  "cost_leakage_report": "",
-  "risk_safety_report": "",
-  "weather_contingency": "",
-  "duplicate_trip_detector": "",
-  "experience_highlights": [],
-  "trip_mood_indicator": {{"Adventure": 60}}
-}}
-"""
+    # ---------------------------------------------------------
+    # 2. REFINE PLAN (This is where your error was)
+    # ---------------------------------------------------------
+    def refine_plan(self, previous_plan_json=None, feedback_query="", rag_data=[], **kwargs):
+        """
+        Refines an existing plan.
+        ✅ FIX: Added 'previous_plan_json' and '**kwargs' to accept all data from UI.
+        """
+        try:
+            rag_str = json.dumps(rag_data, default=str)
+            plan_str = str(previous_plan_json)
 
-        raw = self._ask(prompt)
-        parsed = self._validate(raw)
+            # Construct a strong instruction manually to ensure it works
+            prompt = f"""
+            You are a travel assistant. Refine the following JSON plan based on user feedback.
+            
+            **Current Plan JSON:**
+            {plan_str[:10000]} 
+            
+            **User Feedback:**
+            "{feedback_query}"
+            
+            **New Options (RAG):**
+            {rag_str[:5000]}
+            
+            **Instructions:**
+            1. Modify the plan according to the feedback (e.g. make it cheaper, change location).
+            2. Keep the exact same JSON structure (plan, activities, eco_score, etc.).
+            3. Output ONLY valid JSON.
+            """
+            
+            response = self._ask(prompt)
+            return self._validate(response)
 
-        return parsed if parsed else fallback_itinerary()
+        except Exception as e:
+            logger.exception(f"Refine Failed: {e}")
+            return None
 
-    # ---------------------------------------
-    # REFINE PLAN
-    # ---------------------------------------
-    def refine_plan(self, prev_plan, feedback):
-        prompt = f"""
-You refine travel itineraries.
-
-User Feedback: "{feedback}"
-Previous Plan:
-{json.dumps(prev_plan, indent=2)}
-
-Return NEW **VALID JSON ONLY**.
-"""
-
-        raw = self._ask(prompt)
-        parsed = self._validate(raw)
-
-        return parsed if parsed else prev_plan
-
-    # ---------------------------------------
-    # PACKING LIST
-    # ---------------------------------------
-    def generate_packing_list(self, plan_context, user_profile, list_type):
-        prompt = f"""
-Generate a travel packing list.
-
-Plan: {plan_context}
-User Profile: {user_profile}
-List Type: {list_type}
-
-Return Markdown ONLY.
-"""
-        return self._ask(prompt)
-
-    # ---------------------------------------
-    # STORY
-    # ---------------------------------------
-    def generate_story(self, plan_context, user_name):
-        prompt = f"""
-Write a short travel story for {user_name}.
-
-Plan: {plan_context}
-Return Markdown only.
-"""
-        return self._ask(prompt)
-
-    # ---------------------------------------
-    # CHATBOT Q/A
-    # ---------------------------------------
+    # ---------------------------------------------------------
+    # 3. OTHER HELPERS
+    # ---------------------------------------------------------
     def ask_question(self, plan_context, question):
-        prompt = f"""
-Answer the user's question based on this plan.
+        prompt = f"Context: {str(plan_context)[:5000]}\n\nUser Question: {question}\n\nAnswer briefly."
+        return self._ask(prompt) or "I couldn't answer that."
 
-Plan: {plan_context}
-Question: {question}
+    def generate_packing_list(self, plan_context, user_profile, list_type):
+        # Using str() ensures we don't crash if an object is passed
+        prompt = f"Create a {list_type} packing list for this trip:\n{str(plan_context)[:3000]}"
+        return self._ask(prompt) or "Packing list unavailable."
 
-Keep the answer short.
-"""
-        return self._ask(prompt)
+    def generate_story(self, plan_context, user_name):
+        prompt = f"Write a short travel story for {user_name} based on this plan:\n{str(plan_context)[:3000]}"
+        return self._ask(prompt) or "Story generation failed."
 
-    # ---------------------------------------
-    # UPGRADE SUGGESTIONS
-    # ---------------------------------------
     def get_upgrade_suggestions(self, plan_context, user_profile, rag_data):
-        prompt = f"""
-Suggest 4 premium upgrades.
-
-Plan: {plan_context}
-User Profile: {user_profile}
-RAG Data: {rag_data}
-
-Return Markdown list only.
-"""
-        return self._ask(prompt)
+        prompt = f"Suggest 3 premium upgrades for this plan:\n{str(plan_context)[:3000]}"
+        return self._ask(prompt) or "No upgrades found."
+        
