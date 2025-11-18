@@ -1,70 +1,102 @@
 import os
 import pandas as pd
+from qdrant_client import QdrantClient, models
+from sentence_transformers import SentenceTransformer
+from uuid import uuid4
+from utils.logger import logger
 
+COLLECTION = "eco_travel_v3"
 DATA_DIR = "data"
-COL_HOTEL = os.path.join(DATA_DIR, "hotels.csv")
-COL_ACT = os.path.join(DATA_DIR, "activities.csv")
-COL_PLACE = os.path.join(DATA_DIR, "places.csv")
+VECTOR_DIMENSION = 384
 
 
-class HybridRAG:
-    """Fast CSV-based hybrid RAG (no Qdrant needed)."""
-
+class RAGEngine:
     def __init__(self):
-        self.data = []
+        # Local Qdrant
+        self.client = QdrantClient(path="qdrant_local")
 
-        self._load_csv(COL_HOTEL, "Hotel")
-        self._load_csv(COL_ACT, "Activity")
-        self._load_csv(COL_PLACE, "Place")
+        # Load embedder
+        self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-        print(f"HybridRAG Loaded {len(self.data)} items.")
+        # CSV files
+        self.csv_hotels = os.path.join(DATA_DIR, "hotels.csv")
+        self.csv_activities = os.path.join(DATA_DIR, "activities.csv")
+        self.csv_places = os.path.join(DATA_DIR, "places.csv")
 
-    # -----------------------------
-    # LOAD CSV
-    # -----------------------------
-    def _load_csv(self, path, dtype):
+        # Always recreate & reindex for clean data
+        print("Recreating collection...")
+        self._init_collection()
+        self._index_all()
+        print("RAGEngine Ready ✔")
+
+    # ------------------------
+    def _init_collection(self):
+        self.client.recreate_collection(
+            collection_name=COLLECTION,
+            vectors_config=models.VectorParams(
+                size=VECTOR_DIMENSION,
+                distance=models.Distance.COSINE,
+            ),
+        )
+
+    # ------------------------
+    def _index_file(self, path, data_type):
         if not os.path.exists(path):
-            print(f"Missing CSV: {path}")
+            logger.error(f"Missing: {path}")
             return
-        
+
         df = pd.read_csv(path)
+        points = []
 
         for _, row in df.iterrows():
-            item = row.to_dict()
-            item["data_type"] = dtype
-            item["eco_score"] = float(item.get("eco_score", 0))
-            self.data.append(item)
-
-    # -----------------------------
-    # SIMPLE SMART SEARCH (NO QDRANT)
-    # -----------------------------
-    def search(self, query, top_k=10, min_eco_score=7.0):
-
-        query = query.lower()
-        results = []
-
-        for item in self.data:
-            # Filter eco score
-            if item.get("eco_score", 0) < min_eco_score:
-                continue
+            payload = row.to_dict()
+            payload["data_type"] = data_type
+            payload["eco_score"] = float(payload.get("eco_score", 0))
 
             text = (
-                f"{item.get('name','')} "
-                f"{item.get('location','')} "
-                f"{item.get('description','')}"
-            ).lower()
+                f"{payload.get('name','')} "
+                f"{payload.get('location','')} "
+                f"{payload.get('description','')}"
+            )
 
-            # keyword match score
-            score = 0
-            for word in query.split():
-                if word in text:
-                    score += 1
+            vector = self.embedder.encode(text).tolist()
 
-            if score > 0:
-                item["match_score"] = score
-                results.append(item)
+            points.append(
+                models.PointStruct(
+                    id=str(uuid4()),
+                    vector=vector,
+                    payload=payload,
+                )
+            )
 
-        # sort by match score
-        results = sorted(results, key=lambda x: x["match_score"], reverse=True)
+        if points:
+            self.client.upsert(collection_name=COLLECTION, points=points)
+            print(f"Indexed {len(points)} → {data_type}")
 
-        return results[:top_k]
+    # ------------------------
+    def _index_all(self):
+        print("Indexing all CSV data...")
+        self._index_file(self.csv_hotels, "Hotel")
+        self._index_file(self.csv_activities, "Activity")
+        self._index_file(self.csv_places, "Place")
+        print("Index complete ✔")
+
+    # ------------------------
+    def search(self, query, top_k=10, min_eco_score=7.0):
+        vector = self.embedder.encode(query).tolist()
+
+        results = self.client.search(
+            collection_name=COLLECTION,
+            query_vector=vector,
+            query_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="eco_score",
+                        range=models.Range(gte=min_eco_score),
+                    )
+                ]
+            ),
+            limit=top_k,
+        )
+
+        return [hit.payload for hit in results]
