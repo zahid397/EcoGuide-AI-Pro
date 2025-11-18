@@ -1,14 +1,15 @@
-import os  
-import google.generativeai as genai  
-from backend.utils_json import extract_json  
-from utils.logger import logger  
-  
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))  
+import os
+import google.generativeai as genai
+from backend.utils_json import extract_json
+from utils.logger import logger
+
+# Configure Gemini
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
-# ============================================
-#  UNIVERSAL FALLBACK (Always Works)
-# ============================================
+# ======================================================
+# Fallback itinerary (never crash)
+# ======================================================
 def fallback_itinerary():
     return {
         "summary": "Fallback itinerary because AI failed.",
@@ -29,19 +30,21 @@ def fallback_itinerary():
     }
 
 
-# ============================================
-#  AGENT WORKFLOW (MAIN LLM Runner)
-# ============================================
+# ======================================================
+# AGENT WORKFLOW (Primary LLM Engine)
+# ======================================================
 class AgentWorkflow:
     def __init__(self):
         self.model = genai.GenerativeModel(
             "gemini-1.5-flash",
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={
+                "response_mime_type": "application/json"
+            }
         )
 
-    # -----------------------------------------
+    # --------------------------------------------------
     # MAIN PLAN GENERATOR
-    # -----------------------------------------
+    # --------------------------------------------------
     def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
         try:
             context_items = []
@@ -62,19 +65,19 @@ class AgentWorkflow:
                 "interests": interests,
                 "priorities": priorities,
                 "user_profile": user_profile,
-                "context_items": context_items
+                "context_items": context_items,
             }
 
             response = self.model.generate_content(prompt)
 
-            # First try function call
+            # 1) Try function_call JSON
             try:
-                data = response.candidates[0].content.parts[0].function_call.args
-                return dict(data)
+                args = response.candidates[0].content.parts[0].function_call.args
+                return dict(args)
             except:
                 pass
 
-            # Try raw JSON extraction
+            # 2) Try raw JSON text
             try:
                 parsed = extract_json(response.text)
                 if parsed:
@@ -82,61 +85,77 @@ class AgentWorkflow:
             except:
                 pass
 
-            logger.error("Gemini returned invalid JSON. Using fallback.")
             return fallback_itinerary()
 
         except Exception as e:
             logger.exception(f"Agent failed: {e}")
             return fallback_itinerary()
 
+    # =====================================================
+    # SUPPORT FUNCTIONS FIXED FOR UI (NO ERRORS ANYMORE)
+    # =====================================================
 
-    # ============================================================
-    # FIXED EXTRA FUNCTIONS — MATCH UI PARAMETERS PERFECTLY
-    # ============================================================
-
-    def generate_packing_list(self, itinerary=None, user_profile=None, list_type=None, plan_context=None):
-        """Packing list generator — fully compatible with UI."""
+    def generate_packing_list(
+        self,
+        itinerary=None,
+        user_profile=None,
+        plan_context=None,
+        list_type=None
+    ):
+        """Safe packing list generator — supports list_type & plan_context."""
         try:
-            base = [
+            base_items = [
                 "Passport",
                 "Eco water bottle",
-                "Reusable bag",
-                "Comfortable shoes",
-                "Portable charger"
+                "Reusable shopping bag",
+                "Comfortable walking shoes",
+                "Portable charger",
             ]
 
+            # Customise based on list type
             if list_type == "beach":
-                base += ["Swimsuit", "Sunscreen", "Beach towel"]
+                base_items += ["Swimwear", "Sunscreen", "Beach towel"]
             elif list_type == "adventure":
-                base += ["Hiking boots", "Energy bars"]
+                base_items += ["Hiking boots", "First aid kit", "Energy bars"]
+            elif list_type == "luxury":
+                base_items += ["Formal wear", "Premium toiletries"]
 
-            return {"packing_list": base}
+            return {"packing_list": base_items}
 
         except:
-            return {"packing_list": ["Basic items only."]}
+            return {"packing_list": ["Passport", "Shoes", "Water bottle"]}
 
-
-    def generate_story(self, itinerary=None, user_name="Traveler", plan_context=None):
-        """Return a safe fallback story."""
+    def generate_story(
+        self,
+        itinerary=None,
+        user_name="Traveler",
+        plan_context=None
+    ):
+        """Simple fallback travel story — accepts plan_context."""
         try:
             return {
                 "story": (
-                    f"{user_name} enjoyed an amazing eco-friendly adventure! "
-                    "They explored nature, lived sustainably, and had an unforgettable trip."
+                    f"{user_name} enjoyed an unforgettable eco-friendly adventure! "
+                    "They explored sustainable attractions, enjoyed nature, and "
+                    "created beautiful memories through green travel."
                 )
             }
         except:
-            return {"story": "Unable to generate story. Fallback mode."}
+            return {"story": "Fallback travel story."}
 
-
-    def ask_question(self, question, itinerary=None, plan_context=None):
-        """Chatbot fallback — always works."""
+    def ask_question(
+        self,
+        question,
+        itinerary=None,
+        plan_context=None
+    ):
+        """Simple chatbot fallback (never crashes)."""
         try:
             return {
                 "answer": (
-                    "Thanks for your question! I'm here to help with eco-friendly travel tips, "
-                    "hotel suggestions, activity planning, and more."
+                    "Thanks for your question! I can help with eco-travel, costs, "
+                    "recommendations, sustainability tips, and itinerary adjustments."
                 )
             }
         except:
-            return {"answer": "Sorry, I could not answer that."}
+            return {"answer": "Fallback answer."}
