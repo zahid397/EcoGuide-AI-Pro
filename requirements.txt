@@ -2,10 +2,9 @@ streamlit
 pandas
 python-dotenv
 qdrant-client
-sentence-transformers
+scikit-learn
 google-generativeai
 fpdf2
 gtts
 plotly
 pydantic
-openai>=1.35.0
