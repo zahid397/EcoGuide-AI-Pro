@@ -2,7 +2,7 @@ streamlit
 pandas
 python-dotenv
 qdrant-client
-scikit-learn
+sentence-transformers
 google-generativeai
 fpdf2
 gtts
