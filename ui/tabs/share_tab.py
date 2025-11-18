@@ -4,11 +4,11 @@ import urllib.parse
 def render_share_tab(days, location, interests, budget):
     st.subheader("🔗 Share Your Trip Plan")
     
-    # সোশ্যাল মিডিয়া টেক্সট তৈরি
+    # Generate Social Media Text
     interests_str = ", ".join(interests)
     plan_summary = f"I just planned a {days}-day eco-trip to {location} using EcoGuide AI! 🌍 We're focusing on {interests_str} with a budget of ${budget}. #SustainableTravel"
     
-    # হোয়াটসঅ্যাপ লিংক জেনারেট
+    # Generate WhatsApp Link
     whatsapp_text = urllib.parse.quote_plus(plan_summary)
     whatsapp_url = f"https://wa.me/?text={whatsapp_text}"
     
