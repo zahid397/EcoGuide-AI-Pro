@@ -1,135 +1,70 @@
 import os
 import pandas as pd
-from uuid import uuid4
-from qdrant_client import QdrantClient, models
-from sklearn.feature_extraction.text import TfidfVectorizer
 from utils.logger import logger
-import shutil
 
 DATA_DIR = "data"
-COLLECTION = "eco_travel_v3"
 
-
-class RAGEngine:
-
+class HybridRAG:
     def __init__(self):
+        # Load all CSVs into memory (fast)
+        self.hotels = self._load_csv("hotels.csv")
+        self.activities = self._load_csv("activities.csv")
+        self.places = self._load_csv("places.csv")
 
-        # Always rebuild clean DB
-        if os.path.exists("qdrant_local"):
-            shutil.rmtree("qdrant_local")
-
-        self.client = QdrantClient(path="qdrant_local")
-
-        # Load CSVs first (so TF-IDF can train)
-        self.dataframes = self._load_all_csv()
-
-        # Build TF-IDF on all text once
-        self.vectorizer = self._build_vectorizer()
-
-        # Create Qdrant collection with auto vector size
-        vector_size = len(self.vectorizer.get_feature_names_out())
-        self._init_collection(vector_size)
-
-        # Now index everything
-        self._index_all()
-
-        print("✅ RAG Engine Ready.")
-
-
-    # -------------------------------------------------------
-    def _load_all_csv(self):
-        dfs = []
-        for file in os.listdir(DATA_DIR):
-            if file.endswith(".csv"):
-                path = os.path.join(DATA_DIR, file)
-                try:
-                    df = pd.read_csv(path)
-                    df["__source_type"] = file.replace(".csv", "")
-                    dfs.append(df)
-                except Exception as e:
-                    logger.error(f"Failed to read {file}: {e}")
-        return dfs
-
-
-    # -------------------------------------------------------
-    def _build_vectorizer(self):
-        all_text = []
-
-        for df in self.dataframes:
-            for _, row in df.iterrows():
-                text = f"{row.get('name','')} {row.get('location','')} {row.get('description','')}"
-                all_text.append(text)
-
-        vectorizer = TfidfVectorizer(max_features=500)  # autosize
-        vectorizer.fit(all_text)
-
-        print("TF-IDF vectorizer trained.")
-        return vectorizer
-
-
-    # -------------------------------------------------------
-    def _init_collection(self, vector_size):
-        self.client.recreate_collection(
-            collection_name=COLLECTION,
-            vectors_config=models.VectorParams(
-                size=vector_size,
-                distance=models.Distance.COSINE
-            ),
+        # Merge all data
+        self.all_items = (
+            self.hotels +
+            self.activities +
+            self.places
         )
-        print(f"Collection created → vector size {vector_size}")
 
+        print(f"HybridRAG Loaded: {len(self.all_items)} items.")
 
-    # -------------------------------------------------------
-    def _index_all(self):
-        for df in self.dataframes:
-            dtype = df["__source_type"].iloc[0].capitalize()
-            self._index_dataframe(df, dtype)
-
-
-    # -------------------------------------------------------
-    def _index_dataframe(self, df, data_type):
-        points = []
-
-        for _, row in df.iterrows():
-            payload = row.to_dict()
-            payload["data_type"] = data_type
-            payload["eco_score"] = float(payload.get("eco_score", 0))
-            payload["image_url"] = payload.get("image_url", "https://placehold.co/100")
-
-            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')}"
-            vec = self.vectorizer.transform([text]).toarray()[0].tolist()
-
-            points.append(
-                models.PointStruct(id=str(uuid4()), vector=vec, payload=payload)
-            )
-
-        if points:
-            self.client.upsert(COLLECTION, points)
-            print(f"Indexed {len(points)} items → {data_type}")
-
-
-    # -------------------------------------------------------
-    def search(self, query, top_k=10, min_eco_score=7.0):
-        try:
-            qvec = self.vectorizer.transform([query]).toarray()[0].tolist()
-
-            results = self.client.search(
-                collection_name=COLLECTION,
-                query_vector=qvec,
-                with_payload=True,
-                limit=top_k,
-                query_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="eco_score",
-                            range=models.Range(gte=min_eco_score)
-                        )
-                    ]
-                )
-            )
-
-            return [r.payload for r in results]
-
-        except Exception as e:
-            logger.error(f"Search failed: {e}")
+    def _load_csv(self, filename):
+        path = os.path.join(DATA_DIR, filename)
+        if not os.path.exists(path):
+            logger.error(f"Missing CSV: {filename}")
             return []
+
+        df = pd.read_csv(path).fillna("")
+        return df.to_dict(orient="records")
+
+    # -------------------------
+    # MAIN SEARCH SYSTEM
+    # -------------------------
+    def search(self, query: str, top_k: int = 10, min_eco_score: float = 7.0):
+        """
+        Hybrid Search Algorithm:
+        1. Keyword match (CSV)
+        2. Eco-score filter
+        3. AI ranking (optional)
+        """
+
+        query_lower = query.lower()
+
+        # Step 1 — Filter by eco score
+        eco_filtered = [
+            item for item in self.all_items
+            if float(item.get("eco_score", 0)) >= min_eco_score
+        ]
+
+        # Step 2 — Keyword matching
+        matched = []
+        for item in eco_filtered:
+            text = (
+                f"{item.get('name', '')} "
+                f"{item.get('location', '')} "
+                f"{item.get('description', '')}"
+            ).lower()
+
+            if any(word in text for word in query_lower.split()):
+                matched.append(item)
+
+        # Step 3 — If no match, fallback = return top eco items
+        if not matched:
+            matched = sorted(eco_filtered,
+                             key=lambda x: float(x.get("eco_score", 0)),
+                             reverse=True)
+
+        # Step 4 — Return top_k
+        return matched[:top_k]
