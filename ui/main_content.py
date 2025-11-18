@@ -6,6 +6,7 @@ from ui.tabs import (
     overview_tab, analysis_tab, plan_tab, list_tab,
     packing_tab, story_tab, map_tab, chat_tab, share_tab
 )
+import json
 
 
 def render_main_content(agent, rag):
@@ -24,7 +25,8 @@ def render_main_content(agent, rag):
     location = st.session_state.get("current_trip_location", "Dubai")
     interests = st.session_state.get("current_trip_interests", [])
     priorities = st.session_state.get("current_trip_priorities", {})
-    user_name = st.session_state.get("user_name", "Traveler")
+    user_profile = st.session_state.get("user_profile", {"name": "Traveler"})
+    user_name = user_profile.get("name", "Traveler")
 
     real_cost = calculate_real_cost(itinerary.get("activities", []), days, travelers)
 
@@ -34,7 +36,7 @@ def render_main_content(agent, rag):
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Cost", f"${real_cost}")
     col2.metric("Avg Eco Score", f"{itinerary.get('eco_score', 0)}/10")
-    col3.metric("Carbon Saved", f"{itinerary.get('carbon_saved', '0 kg')}")
+    col3.metric("Carbon Saved", f"{itinerary.get('carbon_saved', '0kg')}")
 
     # Tabs
     tabs = st.tabs([
@@ -62,54 +64,72 @@ def render_main_content(agent, rag):
         share_tab.render_share_tab(days, location, interests, budget)
 
     # ================================
-    # 🔁 REFINEMENT SYSTEM (NO ERRORS)
+    # 🔁 REFINEMENT SYSTEM (FULL FIX)
     # ================================
 
     st.divider()
     st.subheader("🤖 Refine Your Trip Plan")
 
-    # Initialize refine text
     if "refine_text" not in st.session_state:
         st.session_state.refine_text = ""
 
-    # Manual input
-    refine_manual = st.text_input(
+    manual_text = st.text_input(
         "Tell AI what to improve:",
-        placeholder="Example: Make it cheaper, add more fun...",
+        placeholder="Example: Make it cheaper, make it more fun...",
         key="refine_input_box"
     )
 
-    # Quick refine buttons
+    # Buttons
     c1, c2, c3, c4 = st.columns(4)
 
     if c1.button("💰 Cheaper", use_container_width=True):
-        st.session_state.refine_text = "Make the trip cheaper with budget-friendly alternatives."
+        st.session_state.refine_text = "Find cheaper alternatives."
         st.rerun()
 
     if c2.button("🎉 More Fun", use_container_width=True):
-        st.session_state.refine_text = "Add more fun, exciting activities."
+        st.session_state.refine_text = "Add more fun and exciting activities."
         st.rerun()
 
     if c3.button("🌿 More Eco", use_container_width=True):
-        st.session_state.refine_text = "Add more sustainable and eco-friendly options."
+        st.session_state.refine_text = "Increase sustainability. More eco-friendly options."
         st.rerun()
 
     if c4.button("😌 Relaxing", use_container_width=True):
-        st.session_state.refine_text = "Make the trip more relaxing with slow-paced activities."
+        st.session_state.refine_text = "Make the trip slower and more relaxing."
         st.rerun()
 
-    # Final selected refine text
-    refine_query = refine_manual or st.session_state.refine_text
+    refine_query = manual_text or st.session_state.refine_text
 
-    # Update Plan
+    # RUN REFINEMENT
     if st.button("🔄 Update Plan", use_container_width=True):
         if not refine_query:
-            st.warning("Write something to refine the plan.")
-        else:
-            try:
-                updated = agent.refine_plan(itinerary, refine_query)
-                st.session_state.itinerary = updated
-                st.success("Plan updated successfully! 🎉")
-            except Exception as e:
-                st.error("Failed to refine plan.")
-                logger.exception(e)
+            st.warning("Please enter what to refine.")
+            return
+
+        try:
+            previous_json = json.dumps(itinerary)  # SAFE
+
+            rag_data = st.session_state.get("rag_raw_data", [])
+
+            updated_plan = agent.refine_plan(
+                previous_plan_json=previous_json,
+                feedback_query=refine_query,
+                rag_data=rag_data,
+                user_profile=user_profile,
+                priorities=priorities,
+                travelers=travelers,
+                days=days,
+                budget=budget
+            )
+
+            if updated_plan:
+                st.session_state.itinerary = updated_plan
+                st.success("Plan refined successfully! 🎉")
+                st.session_state.refine_text = ""
+                st.rerun()
+            else:
+                st.error("AI could not refine the plan. Try a different instruction.")
+
+        except Exception as e:
+            logger.exception(e)
+            st.error("Failed to refine plan.")
