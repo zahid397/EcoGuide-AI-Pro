@@ -1,157 +1,127 @@
 import os
 import pandas as pd
-import numpy as np
 from qdrant_client import QdrantClient, models
 from sklearn.feature_extraction.text import TfidfVectorizer
 from uuid import uuid4
+from utils.logger import logger
 
 COLLECTION = "eco_travel_v3"
-DATA_DIR = "data"
-VECTOR_DIM = 384
 
 
-# =====================================================
-# TF-IDF Embedder — always 384-dim (FIXED)
-# =====================================================
+# ================================================
+# Cloud-Safe Embedder (No Torch, No Crash)
+# ================================================
 class SafeEmbedder:
     def __init__(self):
-        self.vectorizer = TfidfVectorizer(max_features=VECTOR_DIM)
-        self.fitted = False
+        self.vectorizer = TfidfVectorizer(max_features=384, stop_words="english")
+        self.is_fitted = False
+        self.corpus = []
 
     def fit(self, texts):
+        if not texts:
+            return
         self.vectorizer.fit(texts)
-        self.fitted = True
+        self.is_fitted = True
+        self.corpus = texts
 
     def encode(self, text):
-        if not self.fitted:
-            return [0.0] * VECTOR_DIM
-
+        if not self.is_fitted:
+            self.fit(self.corpus + [text])
         vec = self.vectorizer.transform([text]).toarray()[0]
-
-        # --- FIX: Pad vector if smaller ---
-        if len(vec) < VECTOR_DIM:
-            vec = np.pad(vec, (0, VECTOR_DIM - len(vec)))
-
         return vec.tolist()
 
 
-# =====================================================
-# RAG ENGINE (Universal Qdrant Compatible)
-# =====================================================
+# ================================================
+# RAG ENGINE — FINAL WINNER VERSION
+# ================================================
 class RAGEngine:
     def __init__(self):
+        # Local folder for Streamlit Cloud (no Docker needed)
         self.client = QdrantClient(path="qdrant_local")
         self.embedder = SafeEmbedder()
 
-        # CSV paths
-        self.csv_hotels = os.path.join(DATA_DIR, "hotels.csv")
-        self.csv_activities = os.path.join(DATA_DIR, "activities.csv")
-        self.csv_places = os.path.join(DATA_DIR, "places.csv")
+        # Check if collection exists (new version compatible)
+        collections = self.client.get_collections().collections
+        collection_names = [c.name for c in collections]
 
-        # --- FIX 1: Train embedder before indexing ---
-        self._fit_embedder()
+        if COLLECTION not in collection_names:
+            self._init_collection()
+            self._index_all()
 
-        # --- FIX 2: Recreate collection always ---
-        self._init_collection()
-
-        # --- FIX 3: Re-index all CSV ---
-        self._index_all()
-
-
-    # -------------------------------------------------
-    def _fit_embedder(self):
-        all_texts = []
-
-        for file in [self.csv_hotels, self.csv_activities, self.csv_places]:
-            if os.path.exists(file):
-                df = pd.read_csv(file)
-                for _, row in df.iterrows():
-                    t = f"{row.get('name','')} {row.get('location','')} {row.get('description','')}"
-                    all_texts.append(t)
-
-        if all_texts:
-            self.embedder.fit(all_texts)
-            print("✔ TF-IDF embedder trained on CSV data")
-
-
-    # -------------------------------------------------
     def _init_collection(self):
-        self.client.recreate_collection(
+        self.client.create_collection(
             collection_name=COLLECTION,
-            vectors_config=models.VectorParams(
-                size=VECTOR_DIM,
-                distance=models.Distance.COSINE
-            )
+            vectors_config=models.VectorParams(size=384, distance=models.Distance.COSINE),
         )
-        print("✔ Qdrant collection created")
+        logger.info(f"Collection {COLLECTION} created")
 
-
-    # -------------------------------------------------
     def _index_file(self, file_path, data_type):
         if not os.path.exists(file_path):
-            print(f"⚠ Missing CSV: {file_path}")
+            logger.warning(f"File not found: {file_path}")
             return
 
         df = pd.read_csv(file_path)
-        points = []
+        df.fillna("", inplace=True)
+
+        texts = []
+        payloads = []
 
         for _, row in df.iterrows():
             payload = row.to_dict()
             payload["data_type"] = data_type
-            payload["eco_score"] = float(payload.get("eco_score", 0))
 
-            text = (
-                f"{payload.get('name','')} "
-                f"{payload.get('location','')} "
-                f"{payload.get('description','')}"
-            )
+            # Force eco_score to float
+            try:
+                payload["eco_score"] = float(payload.get("eco_score", 0))
+            except:
+                payload["eco_score"] = 0.0
 
+            text = f"{payload.get('name','')} {payload.get('location','')} {payload.get('description','')} {payload.get('tag','')} {data_type}"
+            texts.append(text)
+            payloads.append(payload)
+
+        # Fit embedder once
+        self.embedder.fit(texts)
+
+        points = []
+        for text, payload in zip(texts, payloads):
             vector = self.embedder.encode(text)
+            points.append(models.PointStruct(id=str(uuid4()), vector=vector, payload=payload))
 
-            points.append(
-                models.PointStruct(
-                    id=str(uuid4()),
-                    vector=vector,
-                    payload=payload
-                )
+        if points:
+            self.client.upsert(collection_name=COLLECTION, points=points)
+            logger.info(f"Indexed {len(points)} items from {file_path}")
+
+    def _index_all(self):
+        logger.info("Starting indexing all CSV files...")
+        self._index_file("data/hotels.csv", "Hotel")
+        self._index_file("data/activities.csv", "Activity")
+        self._index_file("data/places.csv", "Place")
+        logger.info("Indexing completed!")
+
+    def search(self, query, top_k=10, min_eco_score=7.0):
+        try:
+            query_vec = self.embedder.encode(query)
+
+            eco_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="eco_score",
+                        range=models.Range(gte=float(min_eco_score))
+                    )
+                ]
             )
 
-        self.client.upsert(COLLECTION, points)
-        print(f"✔ Indexed {len(points)} from {file_path}")
+            results = self.client.search(
+                collection_name=COLLECTION,
+                query_vector=query_vec,
+                filter=eco_filter,          # ← Fixed: filter= not query_filter=
+                limit=top_k,
+                with_payload=True
+            )
 
+            return [hit.payload for hit in results]
 
-    # -------------------------------------------------
-    def _index_all(self):
-        print("📦 Indexing data...")
-        self._index_file(self.csv_hotels, "Hotel")
-        self._index_file(self.csv_activities, "Activity")
-        self._index_file(self.csv_places, "Place")
-        print("✅ Indexing complete!")
-
-
-    # -------------------------------------------------
-    # SEARCH — works on ALL Qdrant versions (search_batch)
-    # -------------------------------------------------
-    def search(self, query, top_k=10, min_eco_score=7.0):
-        qvec = self.embedder.encode(query)
-
-        batch = models.SearchBatch(
-            searches=[
-                models.SearchRequest(
-                    vector=qvec,
-                    limit=50,
-                    with_payload=True
-                )
-            ]
-        )
-
-        results = self.client.search_batch(collection_name=COLLECTION, requests=batch)
-
-        hits = results[0]
-
-        filtered = [
-            h.payload for h in hits
-            if h.payload.get("eco_score", 0) >= min_eco_score
-        ]
-
-        return filtered[:top_k]
+        except Exception as e:
+            logger.exception(f"RAG Search failed: {e}")
+            return []   # Never crash — always return empty list
