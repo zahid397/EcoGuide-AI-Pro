@@ -1,54 +1,62 @@
 import streamlit as st
-import os
-import sys # ✳️ 1. Import sys
-
-# --- ✳️ 2. FIX: Add project root to Python path ---
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-if PROJECT_ROOT not in sys.path:
-    sys.path.append(PROJECT_ROOT)
-# --- End Fix ---
-
-from utils.env_validator import validate_env
-from utils.caching import get_agent, get_rag
-from utils.state import init_session_state
-from utils.logger import logger
+from backend.agent_workflow import AgentWorkflow
+from backend.rag_engine import RAGEngine
 from ui.sidebar import render_sidebar
 from ui.main_content import render_main_content
-from version import APP_VERSION
 
-def main() -> None:
-    """Main function to run the Streamlit app."""
-    
-    # --- Page Config & State Init ---
-    st.set_page_config(page_title="🌍 EcoGuide AI Pro",
-                       layout="wide",
-                       initial_sidebar_state="expanded")
-    
-    # Initialize all session state keys
-    init_session_state()
+APP_VERSION = "1.0.0"
 
-    st.title("🌍 EcoGuide AI Pro — Adaptive Travel Planner")
+# ===========================
+# APP CONFIG
+# ===========================
+st.set_page_config(
+    page_title="EcoGuide AI 🌍",
+    page_icon="🌱",
+    layout="wide",
+)
 
-    # --- Environment Validator ---
+# ===========================
+# INITIALIZE SESSION KEYS
+# ===========================
+if "itinerary" not in st.session_state:
+    st.session_state.itinerary = None
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+if "packing_list" not in st.session_state:
+    st.session_state.packing_list = {}
+
+if "travel_story" not in st.session_state:
+    st.session_state.travel_story = ""
+
+if "upgrade_suggestions" not in st.session_state:
+    st.session_state.upgrade_suggestions = ""
+
+
+# ===========================
+# MAIN FUNCTION
+# ===========================
+def main():
+
+    # Initialize Models
     try:
-        validate_env()
-    except EnvironmentError as e:
-        st.error(str(e))
-        logger.error(str(e))
-        st.stop()
-
-    # --- Load Cached AI & RAG Engines ---
-    try:
-        agent = get_agent()
-        rag = get_rag()
+        rag = RAGEngine()
+        agent = AgentWorkflow()
     except Exception as e:
-        st.error(f"Failed to initialize AI components: {e}")
-        logger.exception(f"Failed to initialize AI components: {e}")
-        st.stop()
+        st.error("Failed to initialize AI components.")
+        st.exception(e)
+        return
 
-    # --- Render UI ---
+    # LEFT SIDEBAR
     render_sidebar(agent, rag, APP_VERSION)
+
+    # MAIN CONTENT
     render_main_content(agent, rag)
 
+
+# ===========================
+# RUN APP
+# ===========================
 if __name__ == "__main__":
     main()
