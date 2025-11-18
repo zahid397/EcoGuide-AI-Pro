@@ -6,9 +6,41 @@ from utils.logger import logger
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
+# ============================================
+#  UNIVERSAL FALLBACK (Always Works)
+# ============================================
+def fallback_itinerary():
+    return {
+        "summary": "This is an auto-generated fallback itinerary because the AI could not produce a valid response.",
+        "hotel": {
+            "name": "Fallback Eco Hotel",
+            "location": "Dubai",
+            "eco_score": 8.2,
+            "description": "Backup hotel for emergency plan.",
+        },
+        "activities": [
+            {"title": "Fallback City Walk", "eco_score": 8.0},
+            {"title": "Fallback Beach Visit", "eco_score": 7.5},
+        ],
+        "daily_plan": [
+            {"day": 1, "plan": "Relax, fallback sightseeing."},
+            {"day": 2, "plan": "Eco-friendly fallback activity."}
+        ]
+    }
+
+
+# ============================================
+#  AGENT WORKFLOW (WITH FORCED JSON + FALLBACK)
+# ============================================
 class AgentWorkflow:
     def __init__(self):
-        self.model = genai.GenerativeModel("gemini-1.5-flash")
+        # Force Gemini to return PURE JSON ONLY
+        self.model = genai.GenerativeModel(
+            "gemini-1.5-flash",
+            generation_config={
+                "response_mime_type": "application/json"  # 🔥 Forces JSON output
+            }
+        )
 
     def run(
         self,
@@ -23,47 +55,58 @@ class AgentWorkflow:
         priorities
     ):
         try:
-            context = ""
+            # Prepare RAG context for the LLM
+            context_items = []
             for item in rag_data:
-                context += (
-                    f"- {item.get('name')} ({item.get('data_type')}) | "
-                    f"{item.get('location')} | eco={item.get('eco_score')}\n"
-                )
+                context_items.append({
+                    "name": item.get("name", ""),
+                    "type": item.get("data_type", ""),
+                    "location": item.get("location", ""),
+                    "eco_score": item.get("eco_score", 0),
+                    "description": item.get("description", "")
+                })
 
-            prompt = f"""
-You are an AI Eco Travel Planner.
-Your job is to create an itinerary using ONLY these items:
+            # Build full prompt
+            prompt = {
+                "query": query,
+                "budget": budget,
+                "days": days,
+                "travelers": travelers,
+                "interests": interests,
+                "priorities": priorities,
+                "user_profile": user_profile,
+                "context_items": context_items
+            }
 
-{context}
-
-Trip: {query}
-Budget: {budget}
-Days: {days}
-Travelers: {travelers}
-User Interests: {interests}
-
-Return ONLY JSON in this structure:
-
-{{
-  "summary": "...",
-  "hotel": {{ "name": "", "location": "", "eco_score": 0, "reason": "" }},
-  "daily_plan": [
-      {{ "day": 1, "activity": "", "location": "", "eco_score": 0, "reason": "" }}
-  ],
-  "total_estimated_cost": 0
-}}
-"""
-
+            # Request JSON-only answer
             response = self.model.generate_content(prompt)
-            raw = response.text
-            data = extract_json(raw)
 
-            if not data:
-                logger.error("MODEL JSON FAILED: " + raw)
-                return None
+            # -----------------------
+            # 1st Attempt: Function Call
+            # -----------------------
+            try:
+                data = response.candidates[0].content.parts[0].function_call.args
+                return dict(data)
+            except:
+                pass
 
-            return data
+            # -----------------------
+            # 2nd Attempt: Raw JSON Extraction
+            # -----------------------
+            try:
+                raw_text = response.text
+                parsed = extract_json(raw_text)
+                if parsed:
+                    return parsed
+            except:
+                pass
+
+            # -----------------------
+            # 3rd Attempt: FALLBACK
+            # -----------------------
+            logger.error("Gemini failed to produce usable JSON. Using fallback.")
+            return fallback_itinerary()
 
         except Exception as e:
             logger.exception(f"Agent failed: {e}")
-            return None
+            return fallback_itinerary()
