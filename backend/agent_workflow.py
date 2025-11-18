@@ -1,145 +1,147 @@
 import os
 import google.generativeai as genai
-from backend.utils_json import extract_json
+from dotenv import load_dotenv
+from backend.utils import extract_json
+from utils.schemas import ItinerarySchema
 from utils.logger import logger
+from pydantic import ValidationError
+from typing import Dict, Any, Optional, List
 
+load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+MODEL_NAME: str = os.getenv("MODEL", "gemini-1.5-flash")
 
+safety_settings = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
 
-# --------------------------
-# UNIVERSAL FALLBACK PLAN
-# --------------------------
-def fallback_itinerary():
-    return {
-        "summary": "Fallback itinerary (AI failed to produce full plan).",
-        "plan": "Day 1: Explore eco-friendly spots.\nDay 2: Relax and enjoy nature.",
-        "activities": [
-            {"name": "Fallback City Walk", "eco_score": 8.2},
-            {"name": "Fallback Beach Visit", "eco_score": 7.5}
-        ],
-        "daily_plan": [
-            {"day": 1, "plan": "Eco walk around green areas."},
-            {"day": 2, "plan": "Visit a peaceful beach."}
-        ]
-    }
+model = genai.GenerativeModel(MODEL_NAME, safety_settings=safety_settings)
 
+def _load_prompt(filename: str) -> str:
+    try:
+        with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
+            return f.read()
+    except:
+        return ""
 
-# --------------------------
-# AGENT WORKFLOW
-# --------------------------
+PROMPTS = {
+    "itinerary": _load_prompt("itinerary_prompt.txt"),
+    "refine": _load_prompt("refine_prompt.txt"),
+    "upgrade": _load_prompt("upgrade_prompt.txt"),
+    "question": _load_prompt("question_prompt.txt"),
+    "packing": _load_prompt("packing_prompt.txt"),
+    "story": _load_prompt("story_prompt.txt"),
+}
+
 class AgentWorkflow:
-    def __init__(self):
-        self.model = genai.GenerativeModel(
-            "gemini-1.5-flash",
-            generation_config={"response_mime_type": "application/json"}
+
+    # -------------------------------
+    # Generic LLM Caller
+    # -------------------------------
+    def _ask(self, prompt: str) -> Optional[str]:
+        try:
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logger.exception(f"Gemini API call failed: {e}")
+            return None
+
+    # -------------------------------
+    # Validate Schema (JSON)
+    # -------------------------------
+    def _validate_json_output(self, llm_output: str) -> Optional[Dict[str, Any]]:
+        try:
+            json_data = extract_json(llm_output)
+            if not json_data:
+                raise ValueError("No JSON found")
+            parsed = ItinerarySchema(**json_data)
+            return parsed.model_dump()
+        except Exception as e:
+            logger.error(f"JSON Validation Failed: {e}")
+            return None
+
+    # -------------------------------
+    # MAIN PLAN GENERATOR
+    # -------------------------------
+    def run(self, query: str, rag_data: List[Dict], budget: int, interests: List[str],
+            days: int, location: str, travelers: int, user_profile: Dict,
+            priorities: Dict) -> Optional[Dict[str, Any]]:
+
+        prompt = PROMPTS["itinerary"].format(
+            query=query, days=days, travelers=travelers, budget=budget,
+            eco_priority=priorities.get("eco"), budget_priority=priorities.get("budget"),
+            comfort_priority=priorities.get("comfort"), user_profile=user_profile,
+            rag_data=rag_data
         )
 
-    # --------------------------
-    # MAIN PLAN GENERATOR
-    # --------------------------
-    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
-        try:
-            context_items = []
-            for item in rag_data:
-                context_items.append({
-                    "name": item.get("name", ""),
-                    "type": item.get("data_type", ""),
-                    "location": item.get("location", ""),
-                    "eco_score": item.get("eco_score", 0),
-                    "description": item.get("description", "")
-                })
+        result = self._ask(prompt)
+        return self._validate_json_output(result) if result else None
 
-            prompt = {
-                "query": query,
-                "budget": budget,
-                "days": days,
-                "travelers": travelers,
-                "interests": interests,
-                "priorities": priorities,
-                "user_profile": user_profile,
-                "context_items": context_items
-            }
+    # -------------------------------
+    # REFINER — UI Compatible
+    # -------------------------------
+    def refine_plan(self, previous_plan_json: str, feedback_query: str, 
+                    rag_data: List[Dict], user_profile: Dict, priorities: Dict, 
+                    travelers: int, days: int, budget: int) -> Optional[Dict]:
 
-            response = self.model.generate_content(prompt)
+        prompt = PROMPTS["refine"].format(
+            feedback_query=feedback_query,
+            previous_plan_json=previous_plan_json,
+            travelers=travelers,
+            days=days,
+            budget=budget,
+            user_profile=user_profile,
+            rag_data=rag_data,
+            priorities=priorities,
+        )
 
-            # 1) Try structured JSON (function_call)
-            try:
-                data = response.candidates[0].content.parts[0].function_call.args
-                return dict(data)
-            except:
-                pass
+        result = self._ask(prompt)
+        return self._validate_json_output(result) if result else None
 
-            # 2) Try raw JSON text
-            try:
-                parsed = extract_json(response.text)
-                if parsed:
-                    return parsed
-            except:
-                pass
+    # -------------------------------
+    # UPGRADE SUGGESTIONS (No plan_context errors)
+    # -------------------------------
+    def get_upgrade_suggestions(self, plan_context: str, user_profile: Dict, rag_data: List[Dict]) -> str:
+        prompt = PROMPTS["upgrade"].format(
+            plan_context=plan_context,
+            user_profile=user_profile,
+            rag_data=rag_data,
+        )
+        result = self._ask(prompt)
+        return result or "No upgrade suggestions were generated."
 
-            logger.error("Gemini JSON failed → fallback used")
-            return fallback_itinerary()
+    # -------------------------------
+    # CHATBOT
+    # -------------------------------
+    def ask_question(self, plan_context: str, question: str) -> str:
+        prompt = PROMPTS["question"].format(
+            plan_context=plan_context, question=question
+        )
+        result = self._ask(prompt)
+        return result or "Sorry, I could not answer that question."
 
-        except Exception as e:
-            logger.exception(f"Agent run() failed: {e}")
-            return fallback_itinerary()
+    # -------------------------------
+    # PACKING LIST (UI Compatible)
+    # -------------------------------
+    def generate_packing_list(self, plan_context: str, user_profile: Dict, list_type: str) -> str:
+        prompt = PROMPTS["packing"].format(
+            plan_context=plan_context,
+            user_profile=user_profile,
+            list_type=list_type
+        )
+        result = self._ask(prompt)
+        return result or "Packing list unavailable."
 
-    # --------------------------
-    # REFINEMENT (UI SAFE)
-    # --------------------------
-    def refine_plan(self, text, itinerary=None):
-        try:
-            return {
-                "plan": itinerary.get("plan", "No original plan found."),
-                "note": f"Refinement applied: {text}"
-            }
-        except:
-            return {
-                "plan": "Refinement failed. Showing fallback plan.",
-                "note": text
-            }
-
-    # --------------------------
-    # PACKING LIST (NO ERRORS)
-    # --------------------------
-    def generate_packing_list(self, itinerary=None, user_profile=None):
-        try:
-            return {
-                "packing_list": [
-                    "Passport",
-                    "Reusable bottle",
-                    "Portable charger",
-                    "Light clothing",
-                    "Walking shoes"
-                ]
-            }
-        except:
-            return {"packing_list": ["Basic bag only."]}
-
-    # --------------------------
-    # STORY GENERATION (WORKS)
-    # --------------------------
-    def generate_story(self, itinerary=None, user_name="Traveler"):
-        try:
-            return {
-                "story":
-                    f"{user_name} enjoyed an eco-friendly adventure! "
-                    "They explored beautiful green locations, discovered local culture, "
-                    "and experienced nature responsibly."
-            }
-        except:
-            return {"story": "Could not generate story. Fallback active."}
-
-    # --------------------------
-    # CHATBOT (ALWAYS ANSWERS)
-    # --------------------------
-    def ask_question(self, question, itinerary=None):
-        try:
-            return {
-                "answer": (
-                    "Thanks for asking! I can help with eco-friendly travel tips. "
-                    "Try asking about locations, safety, budget, or recommendations."
-                )
-            }
-        except:
-            return {"answer": "Sorry, I could not answer that."}
+    # -------------------------------
+    # STORY GENERATOR
+    # -------------------------------
+    def generate_story(self, plan_context: str, user_name: str) -> str:
+        prompt = PROMPTS["story"].format(
+            plan_context=plan_context,
+            user_name=user_name
+        )
+        result = self._ask(prompt)
+        return result or "Could not generate story."
