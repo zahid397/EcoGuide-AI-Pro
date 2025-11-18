@@ -11,7 +11,7 @@ load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 MODEL_NAME = os.getenv("MODEL", "gemini-1.5-flash")
 
-# Safety settings (Disable blocking to ensure responses)
+# Safety settings
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -21,10 +21,18 @@ safety_settings = [
 
 model = genai.GenerativeModel(MODEL_NAME, safety_settings=safety_settings)
 
-# --- ✳️ EMERGENCY FALLBACK PROMPT ---
+# --- ✳️ FIX: DEFAULT PROMPT WITH PLACEHOLDERS ---
+# ফাইল না পেলে এটি ব্যবহার হবে, এবং এতে {query} ইত্যাদি থাকতে হবে।
 DEFAULT_PROMPT = """
-You are an expert travel planner. Create a JSON itinerary.
-Output JSON ONLY matching this schema:
+You are an expert travel planner. Create a detailed JSON itinerary based on the request.
+
+**Request:**
+Query: {query}
+RAG Data: {rag_data}
+
+**Instructions:**
+1. Create a day-by-day plan in Markdown.
+2. Output ONLY valid JSON matching this schema:
 {
   "plan": "Markdown plan...",
   "activities": [],
@@ -53,6 +61,7 @@ def _load_prompt(filename):
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
     except:
+        logger.warning(f"Prompt file {filename} not found. Using fallback.")
         return DEFAULT_PROMPT
 
 class AgentWorkflow:
@@ -77,17 +86,27 @@ class AgentWorkflow:
             prompt_template = _load_prompt("itinerary_prompt.txt")
             rag_str = json.dumps(rag_data, default=str)
             
-            # Manual formatting to avoid KeyError
+            # --- ✳️ FIX: Safe Replacement ---
+            # যদি টেমপ্লেটে {query} না থাকে (ভুল ফাইলে), আমরা ম্যানুয়ালি যোগ করব
+            if "{query}" not in prompt_template:
+                prompt_template = DEFAULT_PROMPT
+
             prompt = prompt_template.replace("{query}", str(query))
             prompt = prompt.replace("{rag_data}", rag_str)
             
+            # Dynamic replacements
             for k, v in kwargs.items():
-                prompt = prompt.replace("{" + k + "}", str(v))
+                placeholder = "{" + k + "}"
+                if placeholder in prompt:
+                    prompt = prompt.replace(placeholder, str(value))
                 
             return self._validate(self._ask(prompt))
+            
         except Exception as e:
             logger.exception(e)
-            return self._validate(self._ask(f"{DEFAULT_PROMPT}\nQuery: {query}"))
+            # Emergency Fallback
+            fallback = DEFAULT_PROMPT.replace("{query}", str(query)).replace("{rag_data}", str(rag_data)[:500])
+            return self._validate(self._ask(fallback))
 
     def refine_plan(self, previous_plan_json=None, feedback_query="", rag_data=[], **kwargs):
         try:
@@ -103,40 +122,21 @@ class AgentWorkflow:
             logger.exception(e)
             return None
 
-    # --- ✳️ FIX: Chatbot, Story, Packing List (Direct Prompts) ---
+    # --- Helper Functions (Direct Prompts) ---
     
     def ask_question(self, plan_context, question):
-        # Direct prompt ensures it works even if file is missing
-        prompt = f"""
-        You are a helpful travel assistant.
-        Context (The user's trip plan):
-        {str(plan_context)[:5000]}
-        
-        User Question: "{question}"
-        
-        Answer briefly and helpfully.
-        """
-        return self._ask(prompt) or "I'm having trouble connecting right now."
+        prompt = f"Context: {str(plan_context)[:5000]}\nQuestion: {question}\nAnswer briefly."
+        return self._ask(prompt) or "I couldn't answer that."
 
     def generate_packing_list(self, plan_context, user_profile, list_type):
-        prompt = f"""
-        Create a {list_type} packing list for this trip.
-        Plan: {str(plan_context)[:4000]}
-        Output in Markdown.
-        """
+        prompt = f"Create a {list_type} packing list for: {str(plan_context)[:3000]}"
         return self._ask(prompt) or "Could not generate list."
 
     def generate_story(self, plan_context, user_name):
-        prompt = f"""
-        Write a short travel story for {user_name} based on this plan.
-        Plan: {str(plan_context)[:4000]}
-        """
+        prompt = f"Write a story for {user_name} based on: {str(plan_context)[:3000]}"
         return self._ask(prompt) or "Could not generate story."
 
     def get_upgrade_suggestions(self, plan_context, user_profile, rag_data):
-        prompt = f"""
-        Suggest 3 upgrades for this plan.
-        Plan: {str(plan_context)[:4000]}
-        """
-        return self._ask(prompt) or "upgrades available."
+        prompt = f"Suggest 3 upgrades for: {str(plan_context)[:3000]}"
+        return self._ask(prompt) or "No upgrades available."
         
