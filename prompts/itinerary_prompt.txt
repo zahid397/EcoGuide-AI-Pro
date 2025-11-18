@@ -1,7 +1,7 @@
-You are an expert travel planner. You MUST output ONLY valid JSON. 
-Do not write explanations. Do not write markdown outside JSON.
+You are an AI travel planner. Output MUST be ONLY valid JSON. 
+DO NOT write explanations. DO NOT write markdown outside JSON.
 
-Generate a strictly formatted JSON itinerary using the following data:
+Use this input:
 
 "query": "{query}",
 "days": {days},
@@ -15,52 +15,40 @@ Generate a strictly formatted JSON itinerary using the following data:
 "profile_ack": "{profile_ack}",
 "rag_data": {rag_data}
 
-THE OUTPUT MUST BE VALID JSON EXACTLY MATCHING THIS STRUCTURE:
+--------------------------------
+OUTPUT STRICTLY THIS JSON SHAPE:
+--------------------------------
 
 {
-  "plan": "### Day 1: ... (Markdown text)",
-  "activities": [
-    {
-      "name": "Hotel X",
-      "location": "Dubai",
-      "eco_score": 9.0,
-      "cost": 200,
-      "cost_type": "per_night",
-      "data_type": "Hotel",
-      "avg_rating": 4.5,
-      "description": "...",
-      "image_url": "...",
-      "tag": "hidden_gem"
-    }
-  ],
+  "plan": "### Day 1...\n(Markdown text only)",
+  "activities": [],
   "total_cost": 0,
-  "eco_score": 8.5,
-  "carbon_saved": "30kg",
+  "eco_score": 7.5,
+  "carbon_saved": "20kg",
   "waste_free_score": 8,
   "plan_health_score": 90,
   "budget_breakdown": {
-    "Accommodation": 1000,
-    "Food": 300,
-    "Transport": 100,
-    "Activities": 400
+      "Accommodation": 200,
+      "Food": 100,
+      "Transport": 50,
+      "Activities": 120
   },
-  "carbon_offset_suggestion": "Donate to mangrove planting.",
-  "ai_image_prompt": "A realistic eco-friendly scenery...",
-  "ai_time_planner_report": "The schedule is balanced.",
-  "cost_leakage_report": "Lunch cost underestimated.",
-  "risk_safety_report": "Stay hydrated.",
-  "weather_contingency": "Indoor option recommended for hot weather.",
-  "duplicate_trip_detector": "This is a unique trip.",
-  "experience_highlights": ["Eco Hotel", "Beach Walk"],
+  "carbon_offset_suggestion": "Plant mangroves.",
+  "ai_image_prompt": "Eco-friendly trip scenery",
+  "ai_time_planner_report": "Balanced schedule.",
+  "cost_leakage_report": "Costs stable.",
+  "risk_safety_report": "Stay hydrated in heat.",
+  "weather_contingency": "Have indoor plans.",
+  "duplicate_trip_detector": "Trip is unique.",
+  "experience_highlights": ["Eco Walk"],
   "trip_mood_indicator": {
-    "Adventure": 70,
-    "Relax": 30,
-    "Culture": 40
+    "Adventure": 60,
+    "Relax": 40,
+    "Culture": 30
   }
 }
 
-STRICT RULES:
-- ALWAYS return valid JSON.
-- NEVER include ```json…``` or markdown outside the object.
-- NEVER write commentary.
-- Just output the JSON object.
+RULES:
+- ALWAYS RETURN ONLY JSON
+- NEVER RETURN markdown outside JSON
+- If unsure, return simple valid JSON with empty fields
