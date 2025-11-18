@@ -1,64 +1,67 @@
 import streamlit as st
-from backend.agent_workflow import AgentWorkflow
-from backend.rag_engine import RAGEngine
-from ui.sidebar import render_sidebar
-from ui.main_content import render_main_content
-from utils.logger import logger
+from agent_workflow import AgentWorkflow
+import json
 
-APP_VERSION = "2.0.0-Pro-SaaS"
+st.set_page_config(page_title="EcoGuide AI Demo", page_icon="🌍", layout="centered")
 
-# ======================================================
-# INITIALIZE SESSION STATE
-# ======================================================
+agent = AgentWorkflow()
 
-if "itinerary" not in st.session_state:
-    st.session_state.itinerary = None
+st.title("🌍 EcoGuide AI — Demo Version")
 
-if "packing_list" not in st.session_state:
-    st.session_state.packing_list = {}
+st.subheader("Enter Trip Details")
 
-if "travel_story" not in st.session_state:
-    st.session_state.travel_story = ""
+name = st.text_input("Your Name", "Traveler")
+location = st.text_input("Destination", "Dubai")
+days = st.number_input("Days", 1, 30, 3)
+travelers = st.number_input("Travelers", 1, 10, 1)
+budget = st.number_input("Budget ($)", 100, 10000, 1500)
 
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-
-# ======================================================
-# PAGE CONFIG
-# ======================================================
-st.set_page_config(
-    page_title="EcoGuide AI Pro",
-    page_icon="🌍",
-    layout="wide"
+interests = st.multiselect(
+    "Interests",
+    ["Beach", "Adventure", "Food", "Shopping", "Nature"],
+    ["Adventure"]
 )
 
+if st.button("Generate Trip Plan 🚀"):
+    with st.spinner("Generating..."):
+        query = f"A {days}-day trip to {location} for {travelers} people interested in {interests}"
 
-# ======================================================
-# LOAD AGENT + RAG ENGINE
-# ======================================================
-try:
-    agent = AgentWorkflow()
-    rag = RAGEngine()
-except Exception as e:
-    st.error("❌ Failed to initialize AI Engine.")
-    logger.exception(e)
-    st.stop()
+        rag_data = []  # No RAG in demo
+        priorities = {"eco": 7, "budget": 5, "comfort": 6}
+        profile = {"name": name, "interests": interests}
+
+        plan = agent.run(
+            query=query,
+            rag_data=rag_data,
+            budget=budget,
+            interests=interests,
+            days=days,
+            location=location,
+            travelers=travelers,
+            user_profile=profile,
+            priorities=priorities
+        )
+
+        st.success("Plan generated!")
+        st.write(plan["plan"])
+
+        st.subheader("Raw JSON Output")
+        st.json(plan)
+
+        st.session_state["plan"] = plan
 
 
-# ======================================================
-# SIDEBAR
-# ======================================================
-render_sidebar(agent, rag, APP_VERSION)
+# -------------------
+# Refinement
+# -------------------
+if "plan" in st.session_state:
+    st.subheader("Refine Your Plan")
 
+    feedback = st.text_input("Tell AI what to improve", "")
 
-# ======================================================
-# MAIN CONTENT
-# ======================================================
-st.title("🌍 EcoGuide AI Pro — Adaptive Travel Planner")
-
-try:
-    render_main_content(agent, rag)
-except Exception as e:
-    st.error("❌ Failed to render main UI.")
-    logger.exception(e)
+    if st.button("Update Plan"):
+        with st.spinner("Updating..."):
+            updated = agent.refine_plan(st.session_state["plan"], feedback)
+            st.session_state["plan"] = updated
+            st.success("Updated!")
+            st.write(updated["plan"])
