@@ -1,105 +1,69 @@
 import os
+import google.generativeai as genai
+from backend.utils_json import extract_json
 from utils.logger import logger
 
-# ---- Try OpenAI ----
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-
-try:
-    if OPENAI_KEY:
-        from openai import OpenAI
-        openai_client = OpenAI(api_key=OPENAI_KEY)
-        HAS_OPENAI = True
-    else:
-        HAS_OPENAI = False
-except Exception as e:
-    logger.warning(f"OpenAI load failed: {e}")
-    HAS_OPENAI = False
-
-
-# ---- Try GEMINI ----
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-
-try:
-    if GEMINI_KEY:
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_KEY)
-        gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-        HAS_GEMINI = True
-    else:
-        HAS_GEMINI = False
-except Exception as e:
-    logger.warning(f"Gemini load failed: {e}")
-    HAS_GEMINI = False
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 class AgentWorkflow:
-    """Hybrid LLM Agent: Works with OpenAI + Gemini automatically."""
-
     def __init__(self):
-        if not HAS_OPENAI and not HAS_GEMINI:
-            raise RuntimeError(
-                "❌ No AI Model Available.\n"
-                "Please set at least one key:\n"
-                "• OPENAI_API_KEY\n"
-                "• GEMINI_API_KEY"
-            )
+        self.model = genai.GenerativeModel("gemini-1.5-flash")
 
-    # ------------------------------
-    # MAIN EXECUTION
-    # ------------------------------
-    def run(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
-        prompt = self._build_prompt(query, rag_data, budget, interests, days, location, travelers, user_profile, priorities)
-
-        # -----------------------
-        # 1️⃣ Try OPENAI first
-        # -----------------------
-        if HAS_OPENAI:
-            try:
-                response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "You are an eco-travel planning AI."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3
+    def run(
+        self,
+        query,
+        rag_data,
+        budget,
+        interests,
+        days,
+        location,
+        travelers,
+        user_profile,
+        priorities
+    ):
+        try:
+            context = ""
+            for item in rag_data:
+                context += (
+                    f"- {item.get('name')} ({item.get('data_type')}) | "
+                    f"{item.get('location')} | eco={item.get('eco_score')}\n"
                 )
-                return response.choices[0].message["content"]
-            except Exception as e:
-                logger.warning(f"OpenAI failed, switching to Gemini: {e}")
 
-        # -----------------------
-        # 2️⃣ Fallback → Gemini
-        # -----------------------
-        if HAS_GEMINI:
-            try:
-                response = gemini_model.generate_content(prompt)
-                return response.text
-            except Exception as e:
-                logger.error(f"Gemini failed: {e}")
+            prompt = f"""
+You are an AI Eco Travel Planner.
+Your job is to create an itinerary using ONLY these items:
+
+{context}
+
+Trip: {query}
+Budget: {budget}
+Days: {days}
+Travelers: {travelers}
+User Interests: {interests}
+
+Return ONLY JSON in this structure:
+
+{{
+  "summary": "...",
+  "hotel": {{ "name": "", "location": "", "eco_score": 0, "reason": "" }},
+  "daily_plan": [
+      {{ "day": 1, "activity": "", "location": "", "eco_score": 0, "reason": "" }}
+  ],
+  "total_estimated_cost": 0
+}}
+"""
+
+            response = self.model.generate_content(prompt)
+            raw = response.text
+            data = extract_json(raw)
+
+            if not data:
+                logger.error("MODEL JSON FAILED: " + raw)
                 return None
 
-        return None
+            return data
 
-    # -----------------------
-    # PROMPT BUILDER
-    # -----------------------
-    def _build_prompt(self, query, rag_data, budget, interests, days, location, travelers, user_profile, priorities):
-        return f"""
-Generate a structured eco-friendly travel plan.
-
-User: {user_profile.get('name')}
-Location: {location}
-Days: {days}
-Budget: {budget}
-Travelers: {travelers}
-Interests: {interests}
-Priorities: {priorities}
-
-Eco-friendly places from RAG:
-{rag_data}
-
-Query:
-{query}
-
-Return the BEST possible plan.
-"""
+        except Exception as e:
+            logger.exception(f"Agent failed: {e}")
+            return None
