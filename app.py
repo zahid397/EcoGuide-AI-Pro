@@ -1,67 +1,37 @@
 import streamlit as st
-from agent_workflow import AgentWorkflow
-import json
+import os
+import sys
 
-st.set_page_config(page_title="EcoGuide AI Demo", page_icon="🌍", layout="centered")
+# --- PATH FIX: Add root to system path ---
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 
-agent = AgentWorkflow()
+from utils.env_validator import validate_env
+from utils.caching import get_agent, get_rag
+from utils.state import init_session_state
+from utils.logger import logger
+from ui.sidebar import render_sidebar
+from ui.main_content import render_main_content
+from version import APP_VERSION
 
-st.title("🌍 EcoGuide AI — Demo Version")
+def main() -> None:
+    st.set_page_config(page_title="🌍 EcoGuide AI Pro", layout="wide", initial_sidebar_state="expanded")
+    init_session_state()
+    st.title("🌍 EcoGuide AI Pro — Adaptive Travel Planner")
 
-st.subheader("Enter Trip Details")
+    try:
+        validate_env()
+        agent = get_agent()
+        rag = get_rag()
+    except Exception as e:
+        st.error(f"System Error: {e}")
+        logger.exception(f"Startup failed: {e}")
+        st.stop()
 
-name = st.text_input("Your Name", "Traveler")
-location = st.text_input("Destination", "Dubai")
-days = st.number_input("Days", 1, 30, 3)
-travelers = st.number_input("Travelers", 1, 10, 1)
-budget = st.number_input("Budget ($)", 100, 10000, 1500)
+    render_sidebar(agent, rag, APP_VERSION)
+    render_main_content(agent, rag)
 
-interests = st.multiselect(
-    "Interests",
-    ["Beach", "Adventure", "Food", "Shopping", "Nature"],
-    ["Adventure"]
-)
-
-if st.button("Generate Trip Plan 🚀"):
-    with st.spinner("Generating..."):
-        query = f"A {days}-day trip to {location} for {travelers} people interested in {interests}"
-
-        rag_data = []  # No RAG in demo
-        priorities = {"eco": 7, "budget": 5, "comfort": 6}
-        profile = {"name": name, "interests": interests}
-
-        plan = agent.run(
-            query=query,
-            rag_data=rag_data,
-            budget=budget,
-            interests=interests,
-            days=days,
-            location=location,
-            travelers=travelers,
-            user_profile=profile,
-            priorities=priorities
-        )
-
-        st.success("Plan generated!")
-        st.write(plan["plan"])
-
-        st.subheader("Raw JSON Output")
-        st.json(plan)
-
-        st.session_state["plan"] = plan
-
-
-# -------------------
-# Refinement
-# -------------------
-if "plan" in st.session_state:
-    st.subheader("Refine Your Plan")
-
-    feedback = st.text_input("Tell AI what to improve", "")
-
-    if st.button("Update Plan"):
-        with st.spinner("Updating..."):
-            updated = agent.refine_plan(st.session_state["plan"], feedback)
-            st.session_state["plan"] = updated
-            st.success("Updated!")
-            st.write(updated["plan"])
+if __name__ == "__main__":
+    main()
+    
