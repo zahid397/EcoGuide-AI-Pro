@@ -1,80 +1,151 @@
-import pandas as pd
 import os
+import pandas as pd
+from uuid import uuid4
+from qdrant_client import QdrantClient, models
+from utils.logger import logger
 
-
+COLLECTION = "eco_travel_v3"
 DATA_DIR = "data"
 
+# ALL CSV FILES
+CSV_HOTELS = os.path.join(DATA_DIR, "hotels.csv")
+CSV_ACTIVITIES = os.path.join(DATA_DIR, "activities.csv")
+CSV_PLACES = os.path.join(DATA_DIR, "places.csv")
 
+VECTOR_DIM = 32   # small dimension to avoid errors
+
+
+# ------------------------------------------------------------
+# Light-Weight Keyword Based Embedding (Fastest + No Errors)
+# ------------------------------------------------------------
+class TinyEmbedder:
+    """
+    No torch, no transformer, no sentence-transformer.
+    Pure keyword hashing → ALWAYS fixed 32-d vector.
+    """
+    def __init__(self, dim=VECTOR_DIM):
+        self.dim = dim
+
+    def encode(self, text: str):
+        vec = [0] * self.dim
+        for word in text.lower().split():
+            vec[hash(word) % self.dim] += 1
+        return vec
+
+
+# ------------------------------------------------------------
+# RAG ENGINE (Final Stable Version)
+# ------------------------------------------------------------
 class RAGEngine:
-    """
-    Simple Hybrid RAG Engine
-    - Loads CSV files
-    - Filters by eco_score
-    - Keyword ranking based on query words
-    """
-
     def __init__(self):
-        # Load all datasets
-        self.hotels = self._load_csv("hotels.csv")
-        self.activities = self._load_csv("activities.csv")
-        self.places = self._load_csv("places.csv")
 
-        print("RAGEngine Loaded ✓")
-        print(f"Hotels: {len(self.hotels)} | Activities: {len(self.activities)} | Places: {len(self.places)}")
+        self.client = QdrantClient(path="qdrant_local")
+        self.embedder = TinyEmbedder()
 
-    def _load_csv(self, filename):
-        path = os.path.join(DATA_DIR, filename)
-        if not os.path.exists(path):
-            print(f"❗ Missing CSV: {path}")
-            return pd.DataFrame()
-
+        # Ensure fresh collection
         try:
-            df = pd.read_csv(path)
-            return df
-        except Exception as e:
-            print(f"❗ CSV parse error in {filename}: {e}")
-            return pd.DataFrame()
+            self.client.get_collection(COLLECTION)
+            print("🧹 Recreating Qdrant collection...")
+            self.client.delete_collection(COLLECTION)
+        except:
+            pass
 
-    def search(self, query: str, top_k: int = 10, min_eco_score: float = 7.0):
-        """
-        Hybrid local search
-        1. Filter by eco_score >= min
-        2. Keyword match scoring on text fields
-        3. Return top-K results
-        """
+        self._init_collection()
+        self._index_all()
+        print("✅ RAG Engine Loaded Successfully")
 
-        # Merge all data
-        df = pd.concat([self.hotels, self.activities, self.places], ignore_index=True)
+    # --------------------------------------------------------
+    def _init_collection(self):
+        self.client.recreate_collection(
+            collection_name=COLLECTION,
+            vectors_config=models.VectorParams(
+                size=VECTOR_DIM,
+                distance=models.Distance.COSINE
+            )
+        )
+        print("📦 New Qdrant collection created.")
 
-        if df.empty:
-            print("❗ No data loaded in RAGEngine")
-            return []
+    # --------------------------------------------------------
+    def _index_file(self, file_path, data_type):
+        if not os.path.exists(file_path):
+            logger.warning(f"⚠️ Missing file: {file_path}")
+            return
 
-        # --- Step 1: ECO SCORE FILTER ---
-        df = df[df["eco_score"] >= float(min_eco_score)]
+        df = pd.read_csv(file_path)
+        points = []
 
-        if df.empty:
-            print("❗ Eco filter found nothing")
-            return []
+        for _, row in df.iterrows():
+            payload = row.to_dict()
+            payload["data_type"] = data_type
+            payload["eco_score"] = float(payload.get("eco_score", 0))
 
-        # --- Step 2: KEYWORD RANKING ---
-        query = query.lower()
+            text = (
+                f"{payload.get('name','')} "
+                f"{payload.get('location','')} "
+                f"{payload.get('description','')} "
+                f"{data_type}"
+            )
 
-        def calc_score(row):
-            text = f"{row.get('name', '')} {row.get('description', '')} {row.get('location', '')}".lower()
-            score = 0
-            for w in query.split():
-                if w in text:
-                    score += 1
-            return score
+            vec = self.embedder.encode(text)  # ALWAYS 32-d
 
-        df["match_score"] = df.apply(calc_score, axis=1)
+            points.append(
+                models.PointStruct(
+                    id=str(uuid4()),
+                    vector=vec,
+                    payload=payload
+                )
+            )
 
-        # --- Step 3: RANK & SELECT ---
-        df = df.sort_values(by="match_score", ascending=False)
+        if points:
+            self.client.upsert(collection_name=COLLECTION, points=points)
+            print(f"📥 Indexed {len(points)} items → {data_type}")
 
-        results = df.head(top_k).to_dict(orient="records")
+    # --------------------------------------------------------
+    def _index_all(self):
+        print("📚 Indexing all CSV files...")
+        self._index_file(CSV_HOTELS, "Hotel")
+        self._index_file(CSV_ACTIVITIES, "Activity")
+        self._index_file(CSV_PLACES, "Place")
+        print("✅ Indexing complete!")
 
-        print(f"🔍 RAG Search Returned: {len(results)} items")
+    # --------------------------------------------------------
+    def search(self, query, top_k=10, min_eco_score=7.0):
 
-        return results
+        # Convert query → vector
+        qvec = self.embedder.encode(query)
+
+        def do_search(score):
+            try:
+                return self.client.search(
+                    collection_name=COLLECTION,
+                    query_vector=qvec,
+                    query_filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="eco_score",
+                                range=models.Range(gte=score)
+                            )
+                        ]
+                    ),
+                    limit=top_k
+                )
+            except Exception as e:
+                logger.error(f"Qdrant search error: {e}")
+                return []
+
+        # Try strict eco filter
+        results = do_search(min_eco_score)
+
+        # If none found → lower eco score
+        if not results:
+            print("⚠️ Lowering eco score to 7.0")
+            results = do_search(7.0)
+
+        # If STILL empty → return top hotels manually
+        if not results:
+            print("⚠️ Still empty → manual fallback results")
+            df = pd.read_csv(CSV_HOTELS)
+            df = df.sort_values("eco_score", ascending=False)
+            return df.head(5).to_dict(orient="records")
+
+        return [hit.payload for hit in results]
