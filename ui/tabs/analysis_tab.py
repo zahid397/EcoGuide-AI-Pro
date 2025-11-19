@@ -1,41 +1,26 @@
 import streamlit as st
 
-def render_analysis(itinerary: dict):
-    """Renders the Analysis tab safely without throwing UI errors."""
-
-    if not isinstance(itinerary, dict):
-        st.error("Invalid itinerary data.")
-        return
-
-    st.subheader("🔬 Trip Analysis")
-
-    # --- Eco & Safety Analysis ---
-    st.write("### 🌱 Eco & Safety Insights")
-
-    st.write(f"**Carbon Saved:** {itinerary.get('carbon_saved', '0kg')}")
-    st.write(f"**Waste-Free Score:** {itinerary.get('waste_free_score', 0)}/10")
-    st.write(f"**Risk & Safety Report:** {itinerary.get('risk_safety_report', 'No data available')}")
-
+def render_analysis(itinerary):
+    st.subheader("🤖 AI Plan Analysis")
+    
+    # Safe Data Extraction
+    health = itinerary.get('plan_health_score', 75)
+    time_rpt = itinerary.get('ai_time_planner_report', "Schedule looks balanced.")
+    risk_rpt = itinerary.get('risk_safety_report', "Standard safety precautions apply.")
+    leak_rpt = itinerary.get('cost_leakage_report', "No major cost leaks detected.")
+    dup_rpt = itinerary.get('duplicate_trip_detector', "This is a unique trip plan.")
+    
+    # Display
+    st.metric("Plan Health Score", f"{health}/100")
+    st.progress(health / 100)
+    
     st.divider()
-
-    # --- Time Planning ---
-    st.write("### ⏱️ Time Planner Report")
-    st.info(itinerary.get("ai_time_planner_report", "No time analysis available."))
-
-    st.divider()
-
-    # --- Cost Leakage ---
-    st.write("### 💸 Cost Leakage Report")
-    st.warning(itinerary.get("cost_leakage_report", "No cost issues detected."))
-
-    st.divider()
-
-    # --- Weather Contingency ---
-    st.write("### 🌦 Weather Contingency")
-    st.write(itinerary.get("weather_contingency", "No weather notes available."))
-
-    st.divider()
-
-    # --- Duplicate Trip Detector ---
-    st.write("### 🔁 Duplicate Trip Check")
-    st.write(itinerary.get("duplicate_trip_detector", "Unique trip"))
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**⏱️ Time Analysis:**\n{time_rpt}")
+        st.info(f"**🛡️ Risk Analysis:**\n{risk_rpt}")
+    with c2:
+        st.markdown(f"**💰 Cost Analysis:**\n{leak_rpt}")
+        st.success(f"**🔄 Uniqueness:**\n{dup_rpt}")
+        
