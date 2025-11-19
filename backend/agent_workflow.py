@@ -82,7 +82,8 @@ def _load_prompt(filename):
         path = os.path.join(base_path, "prompts", filename)
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
-    except:
+    except Exception as e:
+        logger.debug(f"Could not load prompt file {filename}: {e}")
         return None
 
 class AgentWorkflow:
@@ -97,9 +98,11 @@ class AgentWorkflow:
     def _validate(self, text):
         try:
             data = extract_json(text)
-            if not data: return ItinerarySchema().model_dump()
+            if not data: 
+                return ItinerarySchema().model_dump()
             return ItinerarySchema(**data).model_dump()
-        except:
+        except Exception as e:
+            logger.warning(f"Validation error: {e}")
             return ItinerarySchema().model_dump()
 
     def run(self, query, rag_data, **kwargs):
@@ -108,20 +111,26 @@ class AgentWorkflow:
             file_prompt = _load_prompt("itinerary_prompt.txt")
             prompt_template = file_prompt if file_prompt else ITINERARY_PROMPT_TEMPLATE
 
-            rag_str = json.dumps(rag_data, default=str)
+            rag_str = json.dumps(rag_data, default=str) if rag_data else "[]"
             user_profile = kwargs.get('user_profile', {})
             priorities = kwargs.get('priorities', {})
             
             profile_ack = ""
-            if user_profile.get('interests'):
-                profile_ack = f"User likes {user_profile.get('interests')}"
+            user_interests = user_profile.get('interests', [])
+            if user_interests:
+                # Handle both list and string formats
+                if isinstance(user_interests, list):
+                    interests_str = ", ".join(str(i) for i in user_interests)
+                else:
+                    interests_str = str(user_interests)
+                profile_ack = f"User likes {interests_str}"
 
             # Safe Formatting (Handles both file and hardcoded templates)
             # We replace placeholders manually to avoid KeyError if the file has different keys
             prompt = prompt_template.replace("{query}", str(query))
             prompt = prompt.replace("{rag_data}", rag_str)
             
-            # Replace common keys safely
+            # Replace common keys safely with proper string conversion
             replacements = {
                 "{budget}": str(kwargs.get('budget', 1000)),
                 "{days}": str(kwargs.get('days', 3)),
@@ -130,41 +139,78 @@ class AgentWorkflow:
                 "{budget_priority}": str(priorities.get('budget', 5)),
                 "{comfort_priority}": str(priorities.get('comfort', 5)),
                 "{user_name}": str(user_profile.get('name', 'User')),
-                "{user_interests}": str(user_profile.get('interests', [])),
+                "{user_interests}": str(user_interests) if user_interests else "various activities",
                 "{profile_ack}": profile_ack
             }
             
             for key, val in replacements.items():
                 prompt = prompt.replace(key, val)
 
-            return self._validate(self._ask(prompt))
+            result = self._ask(prompt)
+            return self._validate(result)
 
         except Exception as e:
             logger.exception(f"Run Workflow Failed: {e}")
             return self._validate(None)
 
-    def refine_plan(self, previous_plan_json=None, feedback_query="", rag_data=[], **kwargs):
+    def refine_plan(self, previous_plan_json=None, feedback_query="", rag_data=None, **kwargs):
         try:
+            # Handle None values safely
+            plan_str = str(previous_plan_json)[:8000] if previous_plan_json else "{}"
+            feedback_str = str(feedback_query) if feedback_query else "No feedback provided"
+            rag_str = json.dumps(rag_data, default=str)[:3000] if rag_data else "[]"
+            
             prompt = REFINE_PROMPT_TEMPLATE.format(
-                previous_plan_json=str(previous_plan_json)[:8000], 
-                feedback_query=feedback_query,
-                rag_data=json.dumps(rag_data, default=str)[:3000]
+                previous_plan_json=plan_str, 
+                feedback_query=feedback_str,
+                rag_data=rag_str
             )
-            return self._validate(self._ask(prompt))
+            result = self._ask(prompt)
+            return self._validate(result)
         except Exception as e:
             logger.exception(f"Refine Failed: {e}")
-            return None
+            return self._validate(None)
 
     # --- HELPERS ---
     def ask_question(self, plan_context, question):
-        return self._ask(f"Context: {str(plan_context)[:5000]}\nQuestion: {question}\nAnswer briefly.") or "I couldn't answer that."
+        try:
+            context_str = str(plan_context)[:5000] if plan_context else "No context"
+            question_str = str(question) if question else "No question"
+            prompt = f"Context: {context_str}\nQuestion: {question_str}\nAnswer briefly."
+            result = self._ask(prompt)
+            return result if result else "I couldn't answer that."
+        except Exception as e:
+            logger.exception(f"Ask question failed: {e}")
+            return "I couldn't answer that."
 
     def generate_packing_list(self, plan_context, user_profile, list_type):
-        return self._ask(f"Create a {list_type} packing list for: {str(plan_context)[:3000]}") or "List unavailable."
+        try:
+            context_str = str(plan_context)[:3000] if plan_context else "No context"
+            list_type_str = str(list_type) if list_type else "general"
+            prompt = f"Create a {list_type_str} packing list for: {context_str}"
+            result = self._ask(prompt)
+            return result if result else "List unavailable."
+        except Exception as e:
+            logger.exception(f"Generate packing list failed: {e}")
+            return "List unavailable."
 
     def generate_story(self, plan_context, user_name):
-        return self._ask(f"Write a story for {user_name} based on: {str(plan_context)[:3000]}") or "Story unavailable."
+        try:
+            context_str = str(plan_context)[:3000] if plan_context else "No context"
+            name_str = str(user_name) if user_name else "Traveler"
+            prompt = f"Write a story for {name_str} based on: {context_str}"
+            result = self._ask(prompt)
+            return result if result else "Story unavailable."
+        except Exception as e:
+            logger.exception(f"Generate story failed: {e}")
+            return "Story unavailable."
 
     def get_upgrade_suggestions(self, plan_context, user_profile, rag_data):
-        return self._ask(f"Suggest 3 upgrades for: {str(plan_context)[:3000]}") or "No upgrades."
-        
+        try:
+            context_str = str(plan_context)[:3000] if plan_context else "No context"
+            prompt = f"Suggest 3 upgrades for: {context_str}"
+            result = self._ask(prompt)
+            return result if result else "No upgrades available."
+        except Exception as e:
+            logger.exception(f"Get upgrade suggestions failed: {e}")
+            return "No upgrades available."
