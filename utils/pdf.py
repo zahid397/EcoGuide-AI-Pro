@@ -1,91 +1,95 @@
 from fpdf import FPDF
-from typing import Dict, Any
+from typing import Dict, Any, Union
 from utils.logger import logger
-import re
+import json
 
 def clean_text(text: Any) -> str:
     """
-    Super aggressive cleaner. 
-    Removes Emojis, Markdown, and non-Latin characters to prevent PDF crash.
+    Aggressively cleans text for PDF generation.
+    Removes Emojis, Markdown symbols, and unsupported characters.
     """
     if text is None: return ""
     text = str(text)
     
-    # 1. Remove Markdown (*, #, etc)
-    text = text.replace('#', '').replace('*', '').replace('_', '')
+    # 1. Remove Markdown syntax
+    text = text.replace('#', '').replace('*', '').replace('`', '').replace('_', '')
     
-    # 2. Force Encode to Latin-1 (This kills all Emojis like 💎, 🌿)
-    # 'ignore' means if it finds an emoji, it just deletes it.
-    text = text.encode('latin-1', 'ignore').decode('latin-1')
-    
-    return text
+    # 2. Force ASCII/Latin-1 (This kills Emojis like 💎, 🌿 which cause crashes)
+    # 'ignore' means drop the bad character instead of crashing
+    return text.encode('latin-1', 'ignore').decode('latin-1')
 
-def generate_pdf(itinerary_data: Dict[str, Any]) -> bytes:
-    """Generates a PDF bytes object safely."""
+def generate_pdf(itinerary_data: Union[Dict[str, Any], str]) -> bytes:
+    """
+    Generates a PDF bytes object. 
+    Handles both Dictionary and JSON String inputs to prevent crashes.
+    """
     try:
+        # --- SAFETY FIX: Ensure data is a Dictionary ---
+        data = itinerary_data
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except:
+                logger.error("PDF Generator received invalid JSON string.")
+                return None 
+        
+        if not isinstance(data, dict):
+            logger.error("PDF Generator received non-dict data.")
+            return None
+
         pdf = FPDF()
         pdf.add_page()
         
-        # --- HEADER ---
+        # --- Header ---
         pdf.set_font("Arial", 'B', 16)
-        pdf.cell(0, 10, clean_text("EcoGuide AI - Travel Plan"), 0, 1, 'C')
+        pdf.cell(0, 10, clean_text("EcoGuide AI - Trip Plan"), 0, 1, 'C')
         pdf.ln(5)
         
-        # --- PLAN BODY ---
+        # --- Plan Body ---
         pdf.set_font("Arial", '', 11)
-        raw_plan = str(itinerary_data.get('plan', 'No detailed plan available.'))
+        raw_plan = str(data.get('plan', 'No detailed plan available.'))
         pdf.multi_cell(0, 5, clean_text(raw_plan))
         pdf.ln(10)
         
-        # --- ACTIVITIES TABLE ---
+        # --- Activities List ---
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(0, 10, clean_text("Activities & Costs"), 0, 1, 'L')
         pdf.set_font("Arial", '', 10)
         
-        activities = itinerary_data.get('activities', [])
-        if activities:
+        activities = data.get('activities', [])
+        if isinstance(activities, list) and activities:
             for item in activities:
+                # Handle rare case where item is a string instead of dict
+                if isinstance(item, str): continue
+                
                 name = clean_text(item.get('name', 'Activity'))
-                dtype = clean_text(item.get('data_type', 'Spot'))
                 cost = clean_text(item.get('cost', 0))
                 
-                # Line format: - Name (Type) : $Cost
-                line = f"- {name} ({dtype}) : ${cost}"
+                line = f"- {name} : ${cost}"
                 pdf.multi_cell(0, 6, line)
         else:
-            pdf.cell(0, 6, "No specific activities listed.", 0, 1)
+            pdf.cell(0, 6, clean_text("No specific activities listed."), 0, 1)
 
-        # --- BUDGET TABLE ---
+        # --- Budget Breakdown ---
         pdf.ln(5)
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(0, 10, clean_text("Budget Breakdown"), 0, 1, 'L')
-        
-        # Header
-        pdf.set_font("Arial", 'B', 10)
-        pdf.cell(100, 8, 'Category', 1)
-        pdf.cell(40, 8, 'Cost ($)', 1, 1)
-        
-        # Rows
         pdf.set_font("Arial", '', 10)
-        budget_data = itinerary_data.get('budget_breakdown', {})
         
-        if budget_data:
+        budget_data = data.get('budget_breakdown', {})
+        if isinstance(budget_data, dict) and budget_data:
             for category, cost in budget_data.items():
-                # Ensure everything is string and clean
-                cat_clean = clean_text(str(category))
-                cost_clean = clean_text(str(cost))
-                
-                pdf.cell(100, 8, cat_clean, 1)
-                pdf.cell(40, 8, cost_clean, 1, 1)
+                line = f"{clean_text(category)}: ${clean_text(cost)}"
+                pdf.cell(0, 6, line, 0, 1)
         else:
-            pdf.cell(140, 8, "No budget data available.", 1, 1)
-
-        # Return PDF as bytes
+             pdf.cell(0, 6, clean_text("Budget details not available."), 0, 1)
+                
+        # Return PDF bytes
         return pdf.output(dest='S').encode('latin-1')
         
     except Exception as e:
-        # Log the specific error to terminal/file
-        print(f"❌ PDF GENERATION FAILED: {e}")
-        logger.exception(f"PDF Gen Failed: {e}")
+        # Log the full error to see what happened
+        print(f"❌ PDF CRITICAL ERROR: {e}") 
+        logger.exception(f"PDF Generation Failed: {e}")
         return None
         
