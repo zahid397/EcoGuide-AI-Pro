@@ -1,11 +1,14 @@
 import streamlit as st
 import pandas as pd
 import json
+import time  
 from utils.cards import get_card_css
 from utils.cost import calculate_real_cost
+
 # Import ALL tabs
 from ui.tabs import (
-    overview_tab, analysis_tab, plan_tab, list_tab, packing_tab, story_tab, chat_tab, map_tab, share_tab
+    overview_tab, analysis_tab, plan_tab, list_tab, 
+    packing_tab, story_tab, chat_tab, map_tab, share_tab
 )
 
 def render_main_content(agent, rag):
@@ -13,20 +16,18 @@ def render_main_content(agent, rag):
         st.info("👈 Please fill in your trip details in the sidebar and click 'Generate Plan 🚀'.")
         return
 
-    # --- ✳️ FIX: Ensure Itinerary is a Dictionary ---
+    # --- Ensure Itinerary is a Dictionary ---
     data = st.session_state.itinerary
     
-    # যদি ডাটা স্ট্রিং হয়, তবে জোর করে ডিকশনারি বানাও
     if isinstance(data, str):
         try:
             data = json.loads(data)
         except Exception as e:
             st.error(f"Data Error: Could not parse itinerary. {e}")
-            return # Stop rendering to prevent crash
+            return 
             
-    # সেশন আপডেটেড ডাটা দিয়ে সেভ করো (যাতে পরের বার ঠিক থাকে)
     st.session_state.itinerary = data
-    # ------------------------------------------------
+    # ----------------------------------------
 
     st.markdown(get_card_css(), unsafe_allow_html=True)
     
@@ -40,7 +41,7 @@ def render_main_content(agent, rag):
     
     # Safe Cost Calculation
     activities = data.get('activities', [])
-    if isinstance(activities, str): activities = [] # Safety check for activities too
+    if isinstance(activities, str): activities = [] 
     
     cost = calculate_real_cost(activities, days, pax)
     
@@ -91,9 +92,8 @@ def render_main_content(agent, rag):
             with st.status(f"Refining plan: '{refinement_query}'...", expanded=True) as status:
                 try:
                     status.write("🧠 Re-analyzing request...")
-                    # Load required data for refine
                     from utils.profile import load_profile
-                    from backend.rag_engine import RAGEngine # Import here to avoid circular dependency if any
+                    from backend.rag_engine import RAGEngine 
                     
                     # Re-init RAG just for search context
                     rag = RAGEngine()
@@ -104,7 +104,6 @@ def render_main_content(agent, rag):
                     
                     status.write("🤖 Re-building itinerary...")
                     
-                    # Convert current data to JSON string for the prompt
                     current_json_str = json.dumps(data, default=str)
 
                     new_itinerary = agent.refine_plan(
@@ -118,19 +117,17 @@ def render_main_content(agent, rag):
                     )
                     
                     if new_itinerary:
-                        # Ensure result is a dict
                         if isinstance(new_itinerary, str):
                             new_itinerary = json.loads(new_itinerary)
                             
                         st.session_state.itinerary = new_itinerary
                         status.update(label="✅ Plan Refined!", state="complete")
-                        time.sleep(0.5)
+                        time.sleep(0.5) # ✅ Now this will work perfectly
                         st.rerun()
                     else:
                         status.update(label="❌ AI Failed", state="error")
                         st.error("AI could not refine the plan.")
                 except Exception as e:
                     status.update(label="Error", state="error")
-                    # Fallback: Keep old plan but show error
                     st.warning(f"Could not refine plan: {e}")
                     
